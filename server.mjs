@@ -10,6 +10,13 @@ const HOST = "127.0.0.1";
 const ROOT = path.dirname(fileURLToPath(import.meta.url));
 const LOG_FILE = path.join(ROOT, "data", "events.jsonl");
 const MAX_HISTORY = 500;
+const MIME = {
+  ".html": "text/html; charset=utf-8",
+  ".js": "text/javascript; charset=utf-8",
+  ".css": "text/css; charset=utf-8",
+  ".png": "image/png",
+  ".svg": "image/svg+xml",
+};
 
 fs.mkdirSync(path.dirname(LOG_FILE), { recursive: true });
 
@@ -235,10 +242,24 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
-  if (req.method === "GET" && (url.pathname === "/" || url.pathname === "/index.html")) {
-    res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
-    fs.createReadStream(path.join(ROOT, "public", "index.html")).pipe(res);
-    return;
+  if (req.method === "GET") {
+    // Statische Dateien aus public/ (ohne Ausbruch aus dem Ordner)
+    const pub = path.join(ROOT, "public");
+    let rel;
+    try { rel = decodeURIComponent(url.pathname).replace(/^\/+/, "") || "index.html"; }
+    catch { res.writeHead(400).end(); return; }
+    const file = path.resolve(pub, rel);
+    if (file.startsWith(pub + path.sep)) {
+      fs.stat(file, (err, st) => {
+        if (err || !st.isFile()) { res.writeHead(404).end(); return; }
+        res.writeHead(200, {
+          "content-type": MIME[path.extname(file)] || "application/octet-stream",
+          "cache-control": "no-store",
+        });
+        fs.createReadStream(file).on("error", () => res.destroy()).pipe(res);
+      });
+      return;
+    }
   }
 
   res.writeHead(404).end();
