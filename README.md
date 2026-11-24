@@ -17,7 +17,7 @@ Node 24, keine npm-Abhängigkeiten.
 | `hooks/permission.sh` | Hook für `PermissionRequest`: fragt das Haus, ob du im Browser erlaubst oder ablehnst. |
 | `public/haus.js` | Das Haus: Canvas in Spielpixeln, Figuren, Wege, Tageszeit, Sounds, Panel, Replay, Rückfragen. |
 | `public/text.html` | Einfache Textansicht. |
-| `data/events.jsonl` | Alle Ereignisse mit Zeitstempel (für Replay, nicht im Git). |
+| `data/events.jsonl` | Alle Ereignisse mit Zeitstempel (für Replay und um nach einem Neustart die letzten 6 Stunden wiederherzustellen, nicht im Git). |
 | `CLAUDE.md` | Bittet Claude, Subagents mit `[Name] Aufgabe` zu benennen. |
 
 Die Hooks stehen global in `~/.claude/settings.json`, deshalb erscheint jede Session im Haus, egal in welchem Ordner.
@@ -28,8 +28,9 @@ Die Hooks stehen global in `~/.claude/settings.json`, deshalb erscheint jede Ses
 | Session startet | Chef kommt durch die Tür und klettert in die Chefetage |
 | Subagent startet | Figur kommt durch die Tür (nacheinander, wenn mehrere), sagt ihren Auftrag, klettert in ihren Raum |
 | Tool-Aufruf | Figur tippt am Tisch, Monitor zeigt Code, Sprechblase sagt was |
-| SendMessage | Absender läuft in den Raum des Empfängers und sagt seine Nachricht |
-| Subagent fertig | Figur bringt den Bericht zum Chef, geht zurück und schläft (Zzz, Licht aus) |
+| SendMessage | Absender läuft in den Raum des Empfängers und sagt seine Nachricht. Kam sie nicht an: „Hm, nicht erreichbar.“ |
+| Subagent fertig | Figur bringt den Bericht zum Chef, packt in ihrem Raum einen Umzugskarton und geht damit durch die Tür. Der Raum wird wieder frei. |
+| Ausgezogener Agent bekommt eine Nachricht | Chef ruft ihn, er kommt durch die Tür zurück („Bin wieder da!“) |
 | Rückfrage | gelbe Sprechblase mit „!“ und, falls eingeschaltet, eine Karte zum Erlauben/Ablehnen |
 | Chef wartet auf dich | Chef schlendert durch die Chefetage |
 

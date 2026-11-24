@@ -148,8 +148,8 @@ class Char {
     this.house = house;
     this.agent = agent;
     this.boss = agent.state.key === "main";
-    this.hue = this.boss ? 28 : roomHue(agent.room);
-    this.acc = this.boss ? "crown" : ACCS[(agent.room + 1) % ACCS.length];
+    this.hue = this.boss ? 28 : roomHue(agent.seq || 0);
+    this.acc = this.boss ? "crown" : ACCS[((agent.seq || 0) + 1) % ACCS.length];
     this.x = 0; this.y = 0; this.level = 0;
     this.queue = [];
     this.pose = "stand";
@@ -159,6 +159,9 @@ class Char {
     this.wanderT = 1 + Math.random() * 3;
     this.headX = 0; this.headY = 0;
     this.hidden = false;
+    this.gone = false;    // ausgezogen
+    this.carry = false;   // trägt einen Umzugskarton
+    this.leaving = false; // ist gerade beim Ausziehen
   }
 
   get L() { return this.house.layout(); }
@@ -189,6 +192,7 @@ class Char {
   goto(target) { this.queue.push({ type: "goto", target }); }
 
   update(dt) {
+    if (this.gone) return;
     this.t += dt;
     if (this.sayT > 0) { this.sayT -= dt; if (this.sayT <= 0) this.say = null; }
 
@@ -222,6 +226,12 @@ class Char {
         case "face": this.facing = a.dir; this.queue.shift(); return;
         case "poof": this.house.poof(this.x, this.y - 6); this.queue.shift(); return;
         case "call": a.fn(); this.queue.shift(); return;
+        case "carry": this.carry = a.on; this.queue.shift(); return;
+        case "exit":
+          this.house.doorT = 1.1; play("door", this.house);
+          this.gone = this.hidden = true; this.carry = this.leaving = false; this.queue = [];
+          freeRoom(this.house, this.agent);
+          return;
         case "enter": this.hidden = false; this.house.doorT = 1.1; play("door", this.house); this.queue.shift(); return;
       }
     }
@@ -250,7 +260,7 @@ class Char {
   }
 
   draw() {
-    if (this.hidden) return;
+    if (this.hidden || this.gone) return;
     const st = this.status;
     let fx = Math.round(this.x) - 6, fy = Math.round(this.y) - 12;
     const o = { hue: this.hue, acc: this.acc, eyes: "open", shift: 0, feet: "stand" };
@@ -274,6 +284,15 @@ class Char {
     }
     if (o.eyes === "open" && this.t % 3.7 < 0.12) o.eyes = "closed";
     drawSprite(fx, fy, o);
+    if (this.carry) {
+      // Umzugskarton vor dem Bauch, Ärmchen links und rechts
+      const bx = fx + 2 + (this.facing > 0 ? 1 : -1);
+      R(bx, fy + 5, 10, 7, "#b98a52");
+      R(bx, fy + 5, 10, 1, "#d4a86a");
+      R(bx + 4, fy + 5, 2, 7, "#e8d9b0");
+      R(bx, fy + 11, 10, 1, "#8a6236");
+      P(bx - 1, fy + 7, hsl(this.hue, 62, 62)); P(bx + 10, fy + 7, hsl(this.hue, 62, 62));
+    }
     this.headX = fx + 6; this.headY = fy;
   }
 
@@ -285,7 +304,8 @@ class House {
   constructor(id, cwd) {
     this.id = id; this.cwd = cwd || "";
     this.agents = new Map();   // key -> { state, log, room, char }
-    this.order = [];           // Subagent-Keys in Einzugsreihenfolge
+    this.rooms = [];           // Raum-Index -> Subagent-Key (null = frei)
+    this.seq = 0;              // Einzugsnummer für Farben
     this.parts = [];
     this.smokeT = 0;
     this.doorT = 0;          // > 0: Tür steht offen
@@ -294,9 +314,17 @@ class House {
     this._L = null;
     this.bg = null; this.bgKey = "";
   }
-  get floors() { return Math.max(1, Math.ceil(this.order.length / COLS)); }
+  get floors() { return Math.max(1, Math.ceil(this.rooms.length / COLS)); }
   layout() {
-    if (!this._L || this._L.floors !== this.floors) this._L = makeLayout(this.floors);
+    if (!this._L || this._L.floors !== this.floors) {
+      const old = this._L;
+      this._L = makeLayout(this.floors);
+      // Wer gerade in der Lobby steht, bleibt auf dem Boden, wenn das Haus wächst oder schrumpft
+      if (old) for (const a of this.agents.values()) {
+        const c = a.char;
+        if (c && c.level === -1 && c.pose !== "climb") c.y = this._L.lobby.floorY;
+      }
+    }
     return this._L;
   }
   get boss() { return this.agents.get("main"); }
@@ -443,8 +471,8 @@ function drawStatic(h, L) {
     for (let col = 0; col < COLS; col++) {
       const idx = (lvl - 1) * COLS + col;
       const r = roomRect(L, idx);
-      const key = h.order[idx];
-      if (key) drawRoom(r, roomHue(idx), h.agents.get(key).state.type); else drawEmptyRoom(r);
+      const key = h.rooms[idx];
+      if (key) drawRoom(r, h.agents.get(key).char.hue, h.agents.get(key).state.type); else drawEmptyRoom(r);
     }
   }
   drawLobby(L);
@@ -719,7 +747,7 @@ function drawDynamic(h, L, hits) {
     for (let col = 0; col < COLS; col++) {
       const idx = (lvl - 1) * COLS + col;
       const r = roomRect(L, idx);
-      const key = h.order[idx];
+      const key = h.rooms[idx];
       const st = key ? h.agents.get(key).state.status : "empty";
       rooms.push({ r, st });
       if (key) {
@@ -805,7 +833,7 @@ function updateOverlay(h, L, S, ox, oy, W) {
     for (let col = 0; col < COLS; col++) {
       const idx = (lvl - 1) * COLS + col;
       const r = roomRect(L, idx);
-      const key = h.order[idx];
+      const key = h.rooms[idx];
       const name = key ? h.agents.get(key).state.name || "Agent" : "frei";
       place(label(`p:${idx}`, `plaque sz-${sz}`, name), X(r.x + 3), Y(r.y + 3));
     }
@@ -918,14 +946,33 @@ function getHouse(id, cwd) {
   if (cwd) h.cwd = cwd;
   return h;
 }
-function ensureAgent(h, state) {
+/** Gibt dem Agent den ersten freien Raum (oder einen neuen). */
+function assignRoom(h, a) {
+  let idx = h.rooms.indexOf(null);
+  if (idx < 0) { idx = h.rooms.length; h.rooms.push(a.state.key); } else h.rooms[idx] = a.state.key;
+  a.room = idx;
+  a.departed = false;
+}
+/** Agent ist ausgezogen: Raum wieder frei, leere Räume am Ende fallen weg. */
+function freeRoom(h, a) {
+  if (a.room >= 0 && h.rooms[a.room] === a.state.key) h.rooms[a.room] = null;
+  while (h.rooms.length && !h.rooms[h.rooms.length - 1]) h.rooms.pop();
+  a.room = -2;
+  a.departed = true;
+  if (h.id === currentId) renderPanel();
+}
+function ensureAgent(h, state, opts = {}) {
   let a = h.agents.get(state.key);
   const isNew = !a;
   if (isNew) {
-    a = { state, log: [], room: -1 };
-    if (state.key !== "main") { a.room = h.order.length; h.order.push(state.key); }
+    a = { state, log: [], room: -1, seq: 0, departed: false };
+    if (state.key !== "main") {
+      a.seq = h.seq++;
+      if (opts.departed) { a.room = -2; a.departed = true; } else assignRoom(h, a);
+    }
     h.agents.set(state.key, a);
     a.char = new Char(h, a);
+    if (a.departed) a.char.gone = a.char.hidden = true;
   } else {
     a.state = state;
   }
@@ -961,13 +1008,25 @@ function reportToBoss(h, a) {
   c.queue.push({ type: "say", text: "Bericht ist fertig!", t: 1.8 });
   c.queue.push({ type: "call", fn: () => h.boss && h.boss.char.sayFor(`Danke, ${a.state.name || "du"}!`, 1.6) });
   c.queue.push({ type: "wait", t: 1.9 });
+  moveOut(h, a);
+}
+/** Zurück in den Raum, Karton packen, mit Karton durch die Tür raus. */
+function moveOut(h, a) {
+  const c = a.char;
+  c.queue.push({ type: "call", fn: () => { c.leaving = true; } });
   c.goto("home");
-  c.queue.push({ type: "sit" });
-  c.queue.push({ type: "call", fn: () => play("sleep", h) });
+  c.queue.push({ type: "say", text: "Ich pack zusammen.", t: 1.4 });
+  c.queue.push({ type: "wait", t: 1.0 });
+  c.queue.push({ type: "carry", on: true });
+  c.queue.push({ type: "wait", t: 0.4 });
+  c.goto({ x: DOOR_X, level: -1 });
+  c.queue.push({ type: "say", text: "Tschüss!", t: 1.0 });
+  c.queue.push({ type: "wait", t: 0.6 });
+  c.queue.push({ type: "exit" });
 }
 
 /** Ein Agent läuft in den Raum eines anderen, sagt seine Nachricht und geht zurück. */
-function visit(h, fromA, toA, text) {
+function visit(h, fromA, toA, text, ok = true) {
   const c = fromA.char, home = toA.char.home();
   const x = toA.room < 0 ? BOSS_SEAT_X - 24 : home.x - 18;
   c.goto({ x, level: home.level });
@@ -975,8 +1034,13 @@ function visit(h, fromA, toA, text) {
   c.queue.push({ type: "call", fn: () => play("knock", h) });
   c.queue.push({ type: "say", text: text || "Kurze Frage …", t: 3.2 });
   c.queue.push({ type: "wait", t: 1.2 });
-  c.queue.push({ type: "call", fn: () => toA.char.sayFor(toA.room < 0 ? "Danke, schau ich mir an!" : "Okay, mach ich!", 2.4) });
-  c.queue.push({ type: "wait", t: 2.6 });
+  if (ok) {
+    c.queue.push({ type: "call", fn: () => toA.char.sayFor(toA.room < 0 ? "Danke, schau ich mir an!" : "Okay, mach ich!", 2.4) });
+    c.queue.push({ type: "wait", t: 2.6 });
+  } else {
+    c.queue.push({ type: "say", text: "Hm, nicht erreichbar.", t: 2.0 });
+    c.queue.push({ type: "wait", t: 2.2 });
+  }
   c.goto("home");
   c.queue.push({ type: "sit" });
 }
@@ -993,10 +1057,28 @@ function onEvent(m) {
   }
   if (m.event === "PreToolUse" && !m.visit) play("type", h);
   if (m.event === "Notification") play("alert", h);
+  if (m.event === "SubagentStart" && !isNew) {
+    if (a.departed) {
+      assignRoom(h, a);
+      a.char.gone = false;
+      enterThroughDoor(h, a, "Bin wieder da!");
+    } else if (a.char.leaving) {
+      const c = a.char;
+      c.queue = []; c.carry = false; c.leaving = false;
+      c.goto("home"); c.queue.push({ type: "sit" });
+    }
+  }
   if (m.event === "SubagentStop") reportToBoss(h, a);
+  if (m.event === "SessionEnd") {
+    for (const o of h.agents.values()) if (o.state.key !== "main" && !o.departed && !o.char.leaving) moveOut(h, o);
+  }
   if (m.visit) {
     const toA = h.agents.get(m.visit.to);
-    if (toA && toA !== a) visit(h, a, toA, m.visit.text);
+    if (toA && toA !== a) {
+      const nm = toA.state.name || "Agent";
+      if (toA.departed || toA.char.leaving) a.char.sayFor(m.visit.ok !== false ? `${nm}, komm bitte nochmal!` : `${nm} ist schon ausgezogen.`, 2.6);
+      else visit(h, a, toA, m.visit.text, m.visit.ok !== false);
+    }
   }
   if (m.event === "SessionEnd") h.ended = true;
   if (m.event === "SessionStart") h.ended = false;
@@ -1014,8 +1096,9 @@ function onHello(m) {
   for (const s of m.sessions) {
     const h = getHouse(s.id, s.cwd);
     for (const st of s.agents) {
-      const { a } = ensureAgent(h, st);
-      a.char.placeAtHome();
+      const departed = st.key !== "main" && (st.status === "done" || st.status === "gone");
+      const { a } = ensureAgent(h, st, { departed });
+      if (!departed) a.char.placeAtHome();
       h.lastAt = Math.max(h.lastAt, st.lastAt || 0);
     }
     h.ended = s.agents.length > 0 && s.agents.every((st) => st.status === "gone");
@@ -1067,6 +1150,15 @@ function el(tag, attrs = {}, ...kids) {
 }
 const fmtTime = (t) => new Date(t).toLocaleTimeString("de-AT", { hour12: false });
 
+/** Im Panel des Chefs: wer schon ausgezogen ist (Klick zeigt dessen Bericht und Verlauf). */
+function departedList(h, a) {
+  if (a.state.key !== "main") return [];
+  const gone = [...h.agents.values()].filter((o) => o.departed);
+  if (!gone.length) return [];
+  return [el("h3", {}, "Ausgezogen"), el("div", { className: "gone-list" },
+    ...gone.map((o) => el("button", { className: "gone", type: "button",
+      onclick: () => { selected = o.state.key; renderPanel(); } }, o.state.name || "Agent")))];
+}
 function renderPanel() {
   const h = houses.get(currentId);
   const a = h && h.agents.get(selected);
@@ -1094,10 +1186,12 @@ function renderPanel() {
     el("div", { className: "p-head" }, av,
       el("div", {},
         el("h2", { id: "p-name" }, st.name || "Agent"),
-        el("div", { id: "p-meta" }, el("span", { className: "dot " + st.status }), STATUS_LABEL[st.status] || st.status))),
+        el("div", { id: "p-meta" }, el("span", { className: "dot " + st.status }),
+          a.departed ? "ausgezogen" : STATUS_LABEL[st.status] || st.status))),
     dl,
     st.result ? el("h3", {}, "Letzte Antwort") : null,
     st.result ? el("p", { id: "p-result" }, st.result) : null,
+    ...departedList(h, a),
     el("h3", {}, "Verlauf"),
     log,
   ].filter(Boolean));
@@ -1158,7 +1252,7 @@ function render(dt = 0) {
     skyKey = sk;
   }
   // Haus (gecacht pro Stockwerkszahl)
-  const key = `${L.floors}:${h.order.length}:${phaseName}`;
+  const key = `${L.floors}:${h.rooms.map((k) => k || "-").join(",")}:${phaseName}`;
   if (!h.bg || h.bgKey !== key) {
     h.bg = makeCanvas(LW, L.H);
     G = h.bg.getContext("2d");

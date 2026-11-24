@@ -15,3 +15,6 @@ Regeln:
 - Jedes Mal neu ausdenken, keine festen Lieblingsnamen wiederverwenden.
 - Keine zwei gleichen Namen in einer Session.
 - Der Rest der Beschreibung bleibt eine kurze Aufgabe (3–6 Wörter).
+
+Der Name ist nur für die Anzeige im Haus. Für `SendMessage` an einen Subagent nimm seine
+**Agent-ID** (die du beim Start zurückbekommst), nicht den Namen aus den Klammern.

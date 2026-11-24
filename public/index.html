@@ -112,6 +112,10 @@
   #p-log li { padding: 1px 0; word-break: break-word; }
   #p-log time { color: #7482a6; margin-right: 6px; }
   .hint { color: var(--muted); }
+  .gone-list { display: flex; flex-wrap: wrap; gap: 6px; }
+  .gone { background: #141b33; color: var(--text); border: 1px solid var(--line); border-radius: 6px; padding: 3px 9px;
+          font: 12px Silkscreen, monospace; cursor: pointer; }
+  .gone:hover { border-color: var(--accent); }
 
   @media (max-width: 700px) {
     #panel { left: 8px; right: 8px; top: auto; bottom: 8px; width: auto; max-height: 55vh; }

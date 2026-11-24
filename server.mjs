@@ -112,10 +112,10 @@ function getAgent(s, e) {
 }
 
 /** Verarbeitet ein Roh-Ereignis, aktualisiert den Zustand und liefert eine schlanke Meldung für den Browser. */
-function ingest(e) {
+function ingest(e, now = Date.now()) {
   const s = getSession(e);
   const ev = e.hook_event_name;
-  const now = Date.now();
+  
   const existed = s.agents.has(e.agent_id || "main");
   let a = getAgent(s, e);
   let text = "";
@@ -136,16 +136,6 @@ function ingest(e) {
       a.activity = describeTool(e.tool_name, e.tool_input);
       a.tools++;
       text = a.activity;
-      if (e.tool_name === "SendMessage") {
-        const ti = e.tool_input || {};
-        const target = resolveAgent(s, ti.to || ti.recipient);
-        const what = short(ti.summary || ti.message, 60);
-        if (target && target !== a) {
-          visit = { to: target.key, text: what };
-          a.activity = `besucht ${target.name || "Agent"}: ${what}`;
-          text = a.activity;
-        }
-      }
       if ((e.tool_name === "Agent" || e.tool_name === "Task") && !e.agent_id) {
         s.pendingTasks.push(parseTask(e.tool_input?.description || e.tool_input?.prompt));
       }
@@ -154,6 +144,17 @@ function ingest(e) {
     case "PostToolUse":
       text = `fertig: ${describeTool(e.tool_name, e.tool_input)}`;
       a.activity = "denkt nach";
+      if (e.tool_name === "SendMessage") {
+        // Besuch erst jetzt, wenn feststeht, ob die Nachricht angekommen ist
+        const ti = e.tool_input || {};
+        const target = resolveAgent(s, ti.to || ti.recipient);
+        const ok = !(e.tool_response && e.tool_response.success === false);
+        const what = short(ti.summary || ti.message, 60);
+        if (target && target !== a) {
+          visit = { to: target.key, text: what, ok };
+          text = ok ? `besucht ${target.name || "Agent"}: ${what}` : `wollte ${target.name || "Agent"} erreichen, nicht zugestellt`;
+        }
+      }
       break;
     case "PostToolUseFailure":
       text = `fehlgeschlagen: ${describeTool(e.tool_name, e.tool_input)}${e.error ? " – " + short(e.error, 80) : ""}`;
@@ -465,6 +466,22 @@ fs.watch(path.join(ROOT, "public"), () => {
   clearTimeout(reloadTimer);
   reloadTimer = setTimeout(() => broadcast({ kind: "reload" }), 300);
 });
+
+// Zustand der letzten Stunden aus dem Log wiederherstellen: ein Neustart lässt nichts mehr verschwinden.
+(function restore() {
+  const since = Date.now() - 6 * 3600_000;
+  const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+  let n = 0;
+  for (const e of readLog()) {
+    if (!e._t || e._t < since || !UUID.test(String(e.session_id))) continue;
+    const copy = { ...e };
+    delete copy._t;
+    history.push(ingest(copy, e._t));
+    if (history.length > MAX_HISTORY) history.shift();
+    n++;
+  }
+  if (n) console.log(`${n} Ereignisse der letzten 6 Stunden wiederhergestellt`);
+})();
 
 server.listen(PORT, HOST, () => {
   console.log(`Agent-Haus läuft auf http://${HOST}:${PORT}`);
