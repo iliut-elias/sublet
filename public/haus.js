@@ -1,36 +1,33 @@
-// Agent-Haus – Pixel-Ansicht.
-// Jede Claude-Code-Session ist ein Haus: oben die Chefetage (Haupt-Agent),
-// darunter ein Raum pro Subagent, unten die Lobby. Gezeichnet wird in einer kleinen
-// Auflösung (Spielpixel) und dann scharf hochskaliert; Texte kommen danach in voller Auflösung drauf.
+// Agent-Haus – pixel view.
+// Every Claude Code session is a house: the boss floor (main agent) at the top,
+// one room per subagent below, the lobby at the bottom. Houses of several sessions stand side by side in a street.
+// Everything is drawn at a small resolution (game pixels) and scaled up sharply; texts go on top at full resolution.
 "use strict";
 
-// ---------------------------------------------------------------- Maße (Spielpixel)
+// ---------------------------------------------------------------- Sizes (game pixels)
 const COLS = 3, RW = 120, RH = 72, SLAB = 4, SW = 20;
 const HX = 16, IX = HX + 4, RX0 = IX + SW;
-const HW = 4 + SW + COLS * RW + 4;      // Hausbreite außen
-const LW = HX + HW + 16;                // Bildbreite
+const HW = 4 + SW + COLS * RW + 4;      // outer house width
+const LW = HX + HW + 16;                // image width
 const ROOF_TOP = 12, ATTIC_TOP = 50, LOBBY_H = 56;
 const LADDER_X = IX + SW / 2;
 const BOSS_SEAT_X = RX0 + 170;
 const DOOR_X = RX0 + 180;
 const CHIMNEY_X = HX + HW - 80;
-const WALK = 90, CLIMB = 110;           // Pixel pro Sekunde
+const WALK = 90, CLIMB = 110;           // pixels per second
 
 const OUTLINE = "#141826";
 const CODE_COLORS = ["#6ee7a8", "#6ea8ff", "#ffd166", "#c792ea"];
 const ACCS = ["none", "headphones", "shades", "sprout", "bow", "scarf"];
-const STATUS_LABEL = {
-  working: "arbeitet", idle: "frei", waiting: "braucht dich", done: "fertig", gone: "Session vorbei",
-};
 
-// ---------------------------------------------------------------- Hilfen
-let T = 0; // globale Zeit in Sekunden
+// ---------------------------------------------------------------- Helpers
+let T = 0; // global time in seconds
 const hsl = (h, s, l, a = 1) => `hsla(${h},${s}%,${l}%,${a})`;
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 const basename = (p) => (p || "").split("/").filter(Boolean).pop() || "?";
 const trunc = (s, n) => (s && s.length > n ? s.slice(0, n - 1) + "…" : s || "");
 
-/** Goldener Winkel: aufeinanderfolgende Räume bekommen deutlich verschiedene Farben (nie das Chef-Orange). */
+/** Golden angle: consecutive rooms get clearly different colors (never the boss orange). */
 function roomHue(idx) {
   let h = (200 + idx * 137.5) % 360;
   if (Math.abs(h - 28) < 24) h = (h + 50) % 360;
@@ -55,13 +52,13 @@ function makeCanvas(w, h) {
   return c;
 }
 
-let G = null; // aktueller Zeichenkontext (Spielpixel)
+let G = null; // current drawing context (game pixels)
 function R(x, y, w, h, c) { G.fillStyle = c; G.fillRect(Math.round(x), Math.round(y), w, h); }
 function P(x, y, c) { G.fillStyle = c; G.fillRect(Math.round(x), Math.round(y), 1, 1); }
 
 // ---------------------------------------------------------------- Layout
 function makeLayout(floors) {
-  const levels = [{ top: ATTIC_TOP, floorY: ATTIC_TOP + RH }]; // 0 = Chefetage
+  const levels = [{ top: ATTIC_TOP, floorY: ATTIC_TOP + RH }]; // 0 = boss floor
   for (let i = 1; i <= floors; i++) {
     const top = ATTIC_TOP + RH + SLAB + (i - 1) * (RH + SLAB);
     levels.push({ top, floorY: top + RH });
@@ -71,7 +68,7 @@ function makeLayout(floors) {
   const groundY = lobby.floorY;
   return { floors, levels, lobby, groundY, H: groundY + 30 };
 }
-// level -1 = Lobby
+// level -1 = lobby
 const floorY = (L, level) => (level === -1 ? L.lobby.floorY : L.levels[Math.min(level, L.levels.length - 1)].floorY);
 
 function roomRect(L, idx) {
@@ -80,7 +77,7 @@ function roomRect(L, idx) {
   return { x: RX0 + col * RW, y: L.levels[level].top, w: RW, h: RH, level };
 }
 
-// ---------------------------------------------------------------- Figur (Sprite)
+// ---------------------------------------------------------------- Character (sprite)
 const BODY = [
   ".k........k.",
   ".kk......kk.",
@@ -109,7 +106,7 @@ const ACC = {
   },
 };
 
-/** Zeichnet die Figur mit linker oberer Ecke (fx, fy) in den aktuellen Kontext G. */
+/** Draws the character with its top left corner at (fx, fy) into the current context G. */
 function drawSprite(fx, fy, o) {
   const pal = {
     k: OUTLINE,
@@ -142,7 +139,7 @@ function drawSprite(fx, fy, o) {
   }
 }
 
-// ---------------------------------------------------------------- Figur (Verhalten)
+// ---------------------------------------------------------------- Character (behavior)
 class Char {
   constructor(house, agent) {
     this.house = house;
@@ -159,9 +156,10 @@ class Char {
     this.wanderT = 1 + Math.random() * 3;
     this.headX = 0; this.headY = 0;
     this.hidden = false;
-    this.gone = false;    // ausgezogen
-    this.carry = false;   // trägt einen Umzugskarton
-    this.leaving = false; // ist gerade beim Ausziehen
+    this.gone = false;    // moved out
+    this.carry = false;   // carries a moving box
+    this.leaving = false; // is moving out right now
+    this.scratchT = 0;    // > 0: scratches its head (a tool failed)
   }
 
   get L() { return this.house.layout(); }
@@ -195,6 +193,7 @@ class Char {
     if (this.gone) return;
     this.t += dt;
     if (this.sayT > 0) { this.sayT -= dt; if (this.sayT <= 0) this.say = null; }
+    if (this.scratchT > 0) this.scratchT -= dt;
 
     const a = this.queue[0];
     if (a) {
@@ -238,7 +237,7 @@ class Char {
     this.idle(dt);
   }
 
-  /** Standardverhalten, wenn nichts in der Warteschlange ist. */
+  /** Default behavior when the queue is empty. */
   idle(dt) {
     const home = this.home();
     const atHome = this.level === home.level && Math.abs(this.x - home.x) < 0.5;
@@ -247,7 +246,7 @@ class Char {
       this.pose = "sit"; this.facing = 1;
       return;
     }
-    // frei: im eigenen Raum herumschlendern
+    // idle: stroll around the own room
     if (this.level !== home.level) { this.goto("home"); return; }
     this.wanderT -= dt;
     if (this.wanderT <= 0) {
@@ -282,10 +281,14 @@ class Char {
     } else if (this.queue.length) {
       o.shift = this.facing;
     }
+    if (this.scratchT > 0 && this.pose !== "climb" && this.pose !== "walk") {
+      o.arm = Math.floor(this.t * 10) % 2 ? 1 : 2; // hand at the head, scratching
+      o.eyes = "open"; o.shift = 0;
+    }
     if (o.eyes === "open" && this.t % 3.7 < 0.12) o.eyes = "closed";
     drawSprite(fx, fy, o);
     if (this.carry) {
-      // Umzugskarton vor dem Bauch, Ärmchen links und rechts
+      // moving box in front of the belly, little arms left and right
       const bx = fx + 2 + (this.facing > 0 ? 1 : -1);
       R(bx, fy + 5, 10, 7, "#b98a52");
       R(bx, fy + 5, 10, 1, "#d4a86a");
@@ -299,17 +302,17 @@ class Char {
   get sleeping() { return this.pose === "sit" && (this.status === "done" || this.status === "gone") && !this.queue.length; }
 }
 
-// ---------------------------------------------------------------- Haus
+// ---------------------------------------------------------------- House
 class House {
   constructor(id, cwd) {
     this.id = id; this.cwd = cwd || "";
     this.agents = new Map();   // key -> { state, log, room, char }
-    this.rooms = [];           // Raum-Index -> Subagent-Key (null = frei)
-    this.seq = 0;              // Einzugsnummer für Farben
+    this.rooms = [];           // room index -> subagent key (null = free)
+    this.seq = 0;              // move-in number, for colors
     this.parts = [];
     this.smokeT = 0;
-    this.doorT = 0;          // > 0: Tür steht offen
-    this.nextDoorAt = 0;     // damit mehrere Agents nacheinander eintreten
+    this.doorT = 0;          // > 0: door is open
+    this.nextDoorAt = 0;     // so several agents enter one after another
     this.lastAt = 0;
     this._L = null;
     this.bg = null; this.bgKey = "";
@@ -319,7 +322,7 @@ class House {
     if (!this._L || this._L.floors !== this.floors) {
       const old = this._L;
       this._L = makeLayout(this.floors);
-      // Wer gerade in der Lobby steht, bleibt auf dem Boden, wenn das Haus wächst oder schrumpft
+      // Whoever stands in the lobby stays on the floor when the house grows or shrinks
       if (old) for (const a of this.agents.values()) {
         const c = a.char;
         if (c && c.level === -1 && c.pose !== "climb") c.y = this._L.lobby.floorY;
@@ -351,45 +354,47 @@ class House {
   }
 }
 
-// ---------------------------------------------------------------- Tageszeit
+// ---------------------------------------------------------------- Time of day
 const PHASES = {
-  nacht: {
+  night: {
     sky: ["#060914", "#080c1a", "#0a1020", "#0c1326", "#0f172d", "#121b34", "#151f3a"],
     stars: 1, body: "moon", hillFar: "#0a1128", hillNear: "#0d1631",
     ground: "#241d30", speck: "#2f2640", grass: "#4f9a5a", grass2: "#5fb36a", glass: "#16224a", clouds: null,
   },
-  morgen: {
+  morning: {
     sky: ["#1d2b5a", "#3b3f78", "#6a4a86", "#a45c7e", "#e07a6a", "#f4a261", "#f7c98b"],
     stars: 0.2, body: "sunLow", sun: "#ffb15c", hillFar: "#3a3060", hillNear: "#2f2a4e",
     ground: "#2e2433", speck: "#3a2e40", grass: "#5a9a5a", grass2: "#6cb36a", glass: "#e89a7a", clouds: "#ffd2c4",
   },
-  tag: {
+  day: {
     sky: ["#3f8fd8", "#4d9be0", "#5ea8e6", "#70b4ea", "#84c0ee", "#98ccf2", "#acd6f4"],
     stars: 0, body: "sun", sun: "#ffe27a", hillFar: "#7fbf7a", hillNear: "#5fa85f",
     ground: "#5a4636", speck: "#6e5642", grass: "#6cc068", grass2: "#86d47e", glass: "#9fd3ff", clouds: "#ffffff",
   },
-  abend: {
+  evening: {
     sky: ["#1a1f4a", "#2e2a63", "#55357a", "#8a3f7a", "#c4506a", "#e8735a", "#f4a05a"],
     stars: 0.3, body: "sunLow", sun: "#ff8a4c", hillFar: "#2a2450", hillNear: "#221d40",
     ground: "#251c2e", speck: "#33283f", grass: "#4f8a50", grass2: "#5fa060", glass: "#e88a6a", clouds: "#f6b8a8",
   },
 };
-/** Phase nach echter Uhrzeit; zum Testen per ?zeit=nacht|morgen|tag|abend erzwingbar. */
+/** Phase from the real clock; for testing, force it with ?time=night|morning|day|evening. */
+const PHASE_ALIASES = { nacht: "night", morgen: "morning", tag: "day", abend: "evening" };
 function currentPhase() {
-  const forced = new URLSearchParams(location.search).get("zeit");
-  if (forced && PHASES[forced]) return forced;
+  const q = new URLSearchParams(location.search);
+  const forced = q.get("time") || q.get("zeit");
+  if (forced && PHASES[PHASE_ALIASES[forced] || forced]) return PHASE_ALIASES[forced] || forced;
   const d = new Date(), hr = d.getHours() + d.getMinutes() / 60;
-  if (hr >= 21 || hr < 5) return "nacht";
-  if (hr < 8) return "morgen";
-  if (hr < 17) return "tag";
-  return "abend";
+  if (hr >= 21 || hr < 5) return "night";
+  if (hr < 8) return "morning";
+  if (hr < 17) return "day";
+  return "evening";
 }
 let phaseName = currentPhase();
 setInterval(() => { phaseName = currentPhase(); }, 30000);
 const PH = () => PHASES[phaseName];
 
-// ---------------------------------------------------------------- Himmel + Boden (ganzer Bildschirm)
-/** Zeichnet Himmel, Mond, Hügel und Boden über die ganze Welt. groundY in Weltkoordinaten. */
+// ---------------------------------------------------------------- Sky + ground (whole screen)
+/** Draws sky, moon, hills and ground across the whole world. groundY in world coordinates. */
 function drawSky(WW, WH, groundY, bodyX, bodyY) {
   const ph = PH();
   const band = Math.ceil(groundY / ph.sky.length);
@@ -403,7 +408,7 @@ function drawSky(WW, WH, groundY, bodyX, bodyY) {
     }
     P(bodyX - 3, bodyY - 2, "#d8cfae"); P(bodyX + 2, bodyY + 3, "#d8cfae"); P(bodyX + 3, bodyY + 2, "#d8cfae");
   } else {
-    // Sonne mit Schein
+    // sun with glow
     G.globalAlpha = 0.18;
     for (let dy = -15; dy <= 15; dy++) for (let dx = -15; dx <= 15; dx++) {
       if (dx * dx + dy * dy <= 225) P(bodyX + dx, bodyY + dy, ph.sun);
@@ -413,14 +418,14 @@ function drawSky(WW, WH, groundY, bodyX, bodyY) {
       if (dx * dx + dy * dy <= 81) P(bodyX + dx, bodyY + dy, dx * dx + dy * dy > 64 ? ph.sun : "#fff6c8");
     }
   }
-  // Hügel (zwei Reihen)
+  // hills (two rows)
   for (let x = 0; x < WW; x++) {
     const far = Math.round(22 + 9 * Math.sin(x / 53) + 5 * Math.sin(x / 19 + 2));
     R(x, groundY - far, 1, far, ph.hillFar);
     const near = Math.round(11 + 6 * Math.sin(x / 37) + 4 * Math.sin(x / 13 + 1));
     R(x, groundY - near, 1, near, ph.hillNear);
   }
-  // Boden
+  // ground
   R(0, groundY, WW, WH - groundY, ph.ground);
   R(0, groundY, WW, 2, ph.grass);
   for (let i = 0; i < WW / 8; i++) {
@@ -431,7 +436,7 @@ function drawSky(WW, WH, groundY, bodyX, bodyY) {
   for (let i = 0; i < (WW * (WH - groundY)) / 90; i++) P(rnd() * WW, groundY + 4 + rnd() * (WH - groundY - 4), ph.speck);
 }
 
-/** Ziehende Wolken (nur tagsüber, morgens und abends). */
+/** Drifting clouds (day, morning and evening only). */
 function drawClouds(WW, groundY) {
   const c = PH().clouds;
   if (!c) return;
@@ -450,23 +455,23 @@ function drawClouds(WW, groundY) {
   }
 }
 
-// ---------------------------------------------------------------- Statisches Haus (transparent drumherum)
+// ---------------------------------------------------------------- Static house (transparent around it)
 function drawStatic(h, L) {
   const gy = L.groundY;
 
-  // Schornstein (hinter dem Dach)
+  // chimney (behind the roof)
   R(CHIMNEY_X, ROOF_TOP + 2, 12, 26, "#6b3a3a");
   for (let y = ROOF_TOP + 5; y < ROOF_TOP + 28; y += 4) R(CHIMNEY_X, y, 12, 1, "#562e30");
   R(CHIMNEY_X - 1, ROOF_TOP, 14, 3, "#4a2a2a");
 
-  // Hauskörper
+  // house body
   R(HX, ATTIC_TOP - 2, HW, gy - ATTIC_TOP + 2, "#2c2438");
-  // Schacht mit Leiter
+  // shaft with ladder
   R(IX, ATTIC_TOP, SW, gy - ATTIC_TOP, "#11172a");
 
-  // Chefetage
+  // boss floor
   drawBossRoom(L);
-  // Stockwerke
+  // floors
   for (let lvl = 1; lvl <= L.floors; lvl++) {
     for (let col = 0; col < COLS; col++) {
       const idx = (lvl - 1) * COLS + col;
@@ -477,7 +482,7 @@ function drawStatic(h, L) {
   }
   drawLobby(L);
 
-  // Innenwände mit Türöffnung
+  // inner walls with door openings
   const wall = (x, top, fl) => {
     R(x - 1, top, 2, fl - 17 - top, "#2c2438");
     R(x - 2, fl - 18, 4, 1, "#5a4636");
@@ -488,7 +493,7 @@ function drawStatic(h, L) {
   }
   wall(RX0, L.lobby.top, L.lobby.floorY);
 
-  // Decken/Böden (mit Luke im Schacht)
+  // ceilings/floors (with a hatch in the shaft)
   R(IX, ATTIC_TOP - 2, HW - 8, 2, "#3b3150");
   for (const lv of L.levels) {
     R(IX, lv.floorY, HW - 8, SLAB, "#5a4636");
@@ -496,19 +501,19 @@ function drawStatic(h, L) {
     for (let x = IX + 12; x < IX + HW - 8; x += 16) R(x, lv.floorY + 1, 1, SLAB - 1, "#4a3a2e");
     R(IX + 3, lv.floorY, SW - 6, SLAB, "#11172a");
   }
-  // Leiter
+  // ladder
   const lt = ATTIC_TOP + 6, lb = L.lobby.floorY;
   R(LADDER_X - 5, lt, 1, lb - lt, "#7a5c3e");
   R(LADDER_X + 4, lt, 1, lb - lt, "#7a5c3e");
   for (let y = lt + 2; y < lb; y += 5) R(LADDER_X - 4, y, 8, 1, "#8e6c4a");
 
-  // Außenwände + Fundament
+  // outer walls + foundation
   R(HX, ATTIC_TOP - 2, 4, gy - ATTIC_TOP + 2, "#3b3150");
   R(HX + HW - 4, ATTIC_TOP - 2, 4, gy - ATTIC_TOP + 2, "#3b3150");
   R(HX - 3, gy, HW + 6, 4, "#4a4058");
   for (let x = HX; x < HX + HW; x += 9) R(x, gy + 1, 1, 3, "#3a3248");
 
-  // Dach
+  // roof
   const cx = HX + HW / 2, maxHalf = HW / 2 + 10, rows = ATTIC_TOP - 2 - ROOF_TOP;
   for (let i = 0; i < rows; i++) {
     const y = ROOF_TOP + i, half = Math.round(((i + 1) / rows) * maxHalf);
@@ -518,7 +523,7 @@ function drawStatic(h, L) {
     P(cx - half, y, "#8a4450"); P(cx + half - 1, y, "#8a4450");
   }
   R(HX - 10, ATTIC_TOP - 3, HW + 20, 2, "#3e1a22");
-  // Dachfenster
+  // dormer window
   R(cx - 7, ROOF_TOP + 14, 14, 11, "#3e1a22");
   R(cx - 5, ROOF_TOP + 16, 10, 8, "#ffd98a");
   R(cx - 1, ROOF_TOP + 16, 1, 8, "#3e1a22");
@@ -527,8 +532,8 @@ function drawStatic(h, L) {
 function drawWindow(x, y) {
   R(x, y, 22, 18, "#6e5642");
   R(x + 2, y + 2, 18, 14, PH().glass);
-  if (phaseName === "nacht") { P(x + 5, y + 5, "#cfd8ff"); P(x + 15, y + 11, "#8f9cc8"); }
-  else if (phaseName === "tag") { R(x + 4, y + 4, 5, 2, "#ffffff"); }
+  if (phaseName === "night") { P(x + 5, y + 5, "#cfd8ff"); P(x + 15, y + 11, "#8f9cc8"); }
+  else if (phaseName === "day") { R(x + 4, y + 4, 5, 2, "#ffffff"); }
   R(x + 10, y + 2, 2, 14, "#6e5642");
   R(x + 2, y + 8, 18, 2, "#6e5642");
   R(x - 1, y + 18, 24, 2, "#8a6a4a");
@@ -538,26 +543,26 @@ function drawLampStatic(x, top) {
   R(x - 4, top + 6, 9, 3, "#3c4566");
 }
 function drawDesk(S, fl, monitors = 1) {
-  // Stuhl (Lehne links, die Figur sitzt davor und schaut nach rechts)
+  // chair (backrest on the left, the character sits in front of it facing right)
   R(S - 8, fl - 17, 2, 12, "#46506e");
   R(S - 7, fl - 5, 12, 2, "#46506e");
   R(S - 2, fl - 3, 2, 2, "#2e3550");
   R(S - 5, fl - 1, 8, 1, "#2e3550");
-  // Tisch
+  // desk
   const w = monitors > 1 ? 52 : 34;
   R(S + 8, fl - 11, w, 2, "#9a7650");
   R(S + 9, fl - 9, 2, 9, "#7e603f");
   R(S + 6 + w, fl - 9, 2, 9, "#7e603f");
   R(S + w - 4, fl - 9, 8, 6, "#7e603f");
   R(S + w - 1, fl - 7, 2, 1, "#c9a26a");
-  R(S + 8, fl - 12, 6, 1, "#3a4058"); // Tastatur
+  R(S + 8, fl - 12, 6, 1, "#3a4058"); // keyboard
   for (let m = 0; m < monitors; m++) {
     const mx = S + 14 + m * 18;
     R(mx, fl - 23, 16, 10, "#1b1f2e");
     R(mx + 7, fl - 13, 2, 1, "#2a3044");
     R(mx + 4, fl - 12, 8, 1, "#2a3044");
   }
-  // Tasse
+  // mug
   const cx = S + 8 + w - 6;
   R(cx, fl - 15, 3, 3, "#e8e8f0");
   P(cx + 3, fl - 14, "#e8e8f0");
@@ -584,20 +589,20 @@ function drawWallpaper(r, base, stripe, wains, line) {
   R(r.x, fl - 12, r.w, 12, wains);
   R(r.x, fl - 13, r.w, 1, line);
 }
-/** Wandbild je nach Agent-Typ: Explore = Landkarte, Plan = Whiteboard, sonst ein Bild. */
+/** Wall decoration by agent type: Explore = map, Plan = whiteboard, others = a picture. */
 function drawWallThing(x, y, type) {
   if (type === "Explore") {
     R(x, y, 22, 15, "#8a6a4a");
     R(x + 1, y + 1, 20, 13, "#e8d9b0");
     R(x + 3, y + 3, 6, 4, "#9cc59a"); R(x + 12, y + 7, 7, 5, "#9cc59a"); R(x + 2, y + 9, 4, 3, "#8ab7d8");
-    for (let i = 0; i < 12; i += 2) P(x + 5 + i, y + 8 - (i >> 2), "#c0392b");   // gestrichelte Route
+    for (let i = 0; i < 12; i += 2) P(x + 5 + i, y + 8 - (i >> 2), "#c0392b");   // dashed route
     P(x + 17, y + 4, "#c0392b"); P(x + 16, y + 3, "#c0392b"); P(x + 18, y + 3, "#c0392b");
-    P(x + 16, y + 5, "#c0392b"); P(x + 18, y + 5, "#c0392b");                      // Ziel-X
+    P(x + 16, y + 5, "#c0392b"); P(x + 18, y + 5, "#c0392b");                      // target X
   } else if (type === "Plan") {
     R(x, y, 24, 16, "#8a93ab");
     R(x + 1, y + 1, 22, 14, "#eef1f6");
     for (let i = 0; i < 3; i++) {
-      R(x + 3, y + 3 + i * 4, 2, 2, i < 2 ? "#5fd38a" : "#c7cde0");                // Häkchen-Kästchen
+      R(x + 3, y + 3 + i * 4, 2, 2, i < 2 ? "#5fd38a" : "#c7cde0");                // check boxes
       R(x + 7, y + 3 + i * 4, 10 - i * 2, 1, "#6ea8ff");
     }
     R(x + 1, y + 16, 22, 1, "#6e7690");
@@ -624,7 +629,7 @@ function drawEmptyRoom(r) {
   const fl = r.y + r.h;
   R(r.x + 40, fl - 10, 14, 10, "#5a4636"); R(r.x + 40, fl - 6, 14, 1, "#c9a26a");
   R(r.x + 56, fl - 7, 10, 7, "#4e3c2e"); R(r.x + 60, fl - 7, 2, 7, "#c9a26a");
-  // Spinnennetz
+  // cobweb
   for (let i = 0; i < 6; i++) { P(r.x + r.w - 3 - i, r.y + 1 + i, "#3a4058"); }
   R(r.x + r.w - 8, r.y + 1, 6, 1, "#3a4058");
   R(r.x + r.w - 2, r.y + 1, 1, 6, "#3a4058");
@@ -633,18 +638,18 @@ function drawBossRoom(L) {
   const r = roomRect(L, -1), fl = r.y + r.h;
   drawWallpaper(r, hsl(28, 22, 21), hsl(28, 22, 23.5), hsl(28, 22, 15), hsl(28, 30, 30));
   drawWindow(r.x + 16, r.y + 12);
-  // Whiteboard mit Plan
+  // whiteboard with a plan
   R(r.x + 52, r.y + 10, 44, 26, "#8a93ab");
   R(r.x + 54, r.y + 12, 40, 22, "#d8dde8");
   R(r.x + 58, r.y + 16, 14, 1, "#6ea8ff"); R(r.x + 58, r.y + 20, 22, 1, "#e85d5d");
   R(r.x + 58, r.y + 24, 10, 1, "#5fd38a"); R(r.x + 74, r.y + 24, 8, 1, "#6ea8ff");
   R(r.x + 82, r.y + 15, 6, 6, "#ffd166");
   R(r.x + 58, r.y + 28, 26, 1, "#8a93ab");
-  // Teppich für die Berichte
+  // rug for the reports
   R(r.x + 96, fl - 1, 58, 1, "#7a3b5a");
   R(r.x + 98, fl - 1, 2, 1, "#a85580"); R(r.x + 150, fl - 1, 2, 1, "#a85580");
   drawDesk(BOSS_SEAT_X, fl, 2);
-  // Bücherregal
+  // bookshelf
   R(r.x + 252, r.y + 14, 30, fl - r.y - 14, "#5a4636");
   for (let y = r.y + 24; y < fl - 4; y += 12) {
     R(r.x + 254, y, 26, 2, "#8a6a4a");
@@ -663,16 +668,16 @@ function drawLobby(L) {
   const r = { x: RX0, y: L.lobby.top, w: COLS * RW, h: LOBBY_H }, fl = L.lobby.floorY;
   R(IX, r.y, SW, r.h, "#11172a");
   drawWallpaper(r, "#262338", "#29253c", "#3d3028", "#5a4636");
-  // Tür
+  // door
   R(DOOR_X - 14, fl - 34, 28, 34, "#5a4636");
   R(DOOR_X - 11, fl - 31, 22, 31, "#7a4a32");
   R(DOOR_X - 8, fl - 27, 7, 10, "#6a3f2a"); R(DOOR_X + 1, fl - 27, 7, 10, "#6a3f2a");
   R(DOOR_X - 8, fl - 14, 16, 10, "#6a3f2a");
   P(DOOR_X + 7, fl - 16, "#ffd166");
   R(DOOR_X - 16, fl - 1, 32, 1, "#8a3b3b");
-  // Bank
+  // bench
   R(r.x + 50, fl - 9, 34, 2, "#8a6a4a"); R(r.x + 52, fl - 7, 2, 7, "#6e5242"); R(r.x + 80, fl - 7, 2, 7, "#6e5242");
-  // Garderobe
+  // coat rack
   R(r.x + 260, fl - 32, 2, 32, "#6e5642"); R(r.x + 255, fl - 1, 12, 1, "#6e5642");
   R(r.x + 256, fl - 30, 10, 1, "#6e5642");
   R(r.x + 256, fl - 29, 4, 9, "#6ea8ff"); R(r.x + 262, fl - 29, 4, 7, "#e85d5d");
@@ -681,7 +686,7 @@ function drawLobby(L) {
   drawLampStatic(r.x + 240, r.y);
 }
 
-// ---------------------------------------------------------------- Dynamisches Zeichnen
+// ---------------------------------------------------------------- Dynamic drawing
 function drawScreen(x, y, w, h, status, seed) {
   if (status === "working") {
     R(x, y, w, h, "#0f2338");
@@ -700,7 +705,7 @@ function drawScreen(x, y, w, h, status, seed) {
     R(x, y, w, h, "#05070d");
   }
 }
-/** Zweiter Bildschirm mit Terminal (für Agents, die viel im Terminal arbeiten). */
+/** Second screen with a terminal (for agents that use the terminal a lot). */
 function drawTerminal(x, fl, status) {
   R(x, fl - 23, 14, 10, "#1b1f2e");
   R(x + 6, fl - 13, 2, 1, "#2a3044");
@@ -715,7 +720,7 @@ function lit(status) { return status === "working" || status === "waiting" || st
 function drawBulb(x, top, on) {
   R(x - 1, top + 9, 3, 1, on ? "#ffe9a8" : "#3a3a48");
   if (!on) return;
-  // weicher Lichtkegel nach unten
+  // soft cone of light downwards
   for (let i = 0; i < 16; i++) {
     G.fillStyle = `rgba(255,226,150,${0.09 * (1 - i / 16)})`;
     G.fillRect(Math.round(x - 2 - i * 0.9), top + 10 + i, Math.round(5 + i * 1.8), 1);
@@ -733,7 +738,7 @@ function roomOverlay(r, status) {
 function drawDynamic(h, L, hits) {
   const boss = h.boss;
   const bossStatus = boss ? boss.state.status : "gone";
-  // Chefetage
+  // boss floor
   const br = roomRect(L, -1);
   drawScreen(BOSS_SEAT_X + 15, br.y + br.h - 22, 14, 8, bossStatus, 1);
   drawScreen(BOSS_SEAT_X + 33, br.y + br.h - 22, 14, 8, bossStatus === "working" ? "working" : bossStatus, 2);
@@ -741,7 +746,7 @@ function drawDynamic(h, L, hits) {
   drawBulb(br.x + 240, br.y, lit(bossStatus));
   if (boss) hits.push({ ...br, key: "main" });
 
-  // Räume
+  // rooms
   const rooms = [];
   for (let lvl = 1; lvl <= L.floors; lvl++) {
     for (let col = 0; col < COLS; col++) {
@@ -770,22 +775,22 @@ function drawDynamic(h, L, hits) {
   drawBulb(RX0 + 120, L.lobby.top, lobbyOn);
   drawBulb(RX0 + 240, L.lobby.top, lobbyOn);
 
-  // Figuren
+  // characters
   for (const a of h.agents.values()) a.char.draw();
 
-  // Partikel
+  // particles
   for (const p of h.parts) {
     G.globalAlpha = clamp(p.life / p.max, 0, 1);
     R(p.x, p.y, p.size, p.size, p.color);
   }
   G.globalAlpha = 1;
 
-  // Licht/Dunkel je Raum
+  // light/dark per room
   roomOverlay(br, boss ? bossStatus : "gone");
   for (const { r, st } of rooms) roomOverlay(r, st);
   if (h.ended) { G.fillStyle = "rgba(4,6,16,0.4)"; G.fillRect(RX0, L.lobby.top, COLS * RW, LOBBY_H); }
 
-  // Auswahl
+  // selection
   const sel = panelOpen && h.id === currentId ? hits.find((x) => x.key === selected) : null;
   if (sel) {
     const c = "#6ea8ff";
@@ -794,8 +799,8 @@ function drawDynamic(h, L, hits) {
   }
 }
 
-// ---------------------------------------------------------------- Texte (HTML über dem Canvas)
-// Text als echte HTML-Elemente auf ganzen Pixeln: der Browser rendert ihn scharf.
+// ---------------------------------------------------------------- Texts (HTML on top of the canvas)
+// Text as real HTML elements on whole pixels: the browser renders it sharply.
 const overlay = document.getElementById("overlay");
 const labels = new Map(); // key -> { el, cls, text, w, h, left, top, op, tx, seen }
 let frameNo = 0;
@@ -818,34 +823,36 @@ function place(l, left, top, op = 1) {
   if (l.top !== top) { l.el.style.top = `${top}px`; l.top = top; }
   if (l.op !== op) { l.el.style.opacity = op; l.op = op; }
 }
-// Sobald die Pixel-Schriften geladen sind, alle Größen neu messen.
+// Once the pixel fonts are loaded, measure all sizes again.
 document.fonts && document.fonts.ready.then(() => { for (const l of labels.values()) l.text = null; });
 
-function updateOverlay(h, L, S, ox, oy, W) {
+/** Signs and speech bubbles of the current house, plus a name sign above each neighbor house. */
+function updateOverlay(h, L, S, ox, oy, W, neighbors) {
   frameNo++;
   const sz = S >= 3 ? "l" : S >= 2 ? "m" : "s";
   const X = (g) => Math.round((g + ox) * S), Y = (g) => Math.round((g + oy) * S);
 
-  // Schilder
+  // signs
   const br = roomRect(L, -1);
-  place(label("p:boss", `plaque gold sz-${sz}`, h.boss ? `Chef · ${basename(h.cwd)}` : "Chefetage"), X(br.x + 3), Y(br.y + 3));
+  const bossSign = h.boss ? t("plaque.boss", { dir: basename(h.cwd) }) : t("plaque.bossEmpty");
+  place(label("p:boss", `plaque gold sz-${sz}`, bossSign), X(br.x + 3), Y(br.y + 3));
   for (let lvl = 1; lvl <= L.floors; lvl++) {
     for (let col = 0; col < COLS; col++) {
       const idx = (lvl - 1) * COLS + col;
       const r = roomRect(L, idx);
       const key = h.rooms[idx];
-      const name = key ? h.agents.get(key).state.name || "Agent" : "frei";
+      const name = key ? agentName(h.agents.get(key).state) : t("plaque.free");
       place(label(`p:${idx}`, `plaque sz-${sz}`, name), X(r.x + 3), Y(r.y + 3));
     }
   }
-  const sign = label("p:lobby", `plaque gold sz-${sz}`, "AGENT-HAUS");
+  const sign = label("p:lobby", `plaque gold sz-${sz}`, t("sign"));
   place(sign, Math.round(X(DOOR_X) - sign.w / 2), Y(L.lobby.top + 6));
 
-  const placed = []; // schon gesetzte Sprechblasen, damit sich keine überdecken
+  const placed = []; // bubbles already placed, so none covers another
   for (const a of h.agents.values()) {
     const c = a.char, st = a.state.status, key = a.state.key;
     if (c.hidden) continue;
-    // Schlafende: Zzz
+    // sleeping: Zzz
     if (c.sleeping) {
       for (let i = 0; i < 3; i++) {
         const ph = (T * 0.5 + i / 3) % 1;
@@ -853,11 +860,11 @@ function updateOverlay(h, L, S, ox, oy, W) {
         place(z, X(c.headX + 5 + ph * 7), Y(c.headY - 6 - ph * 12), Math.round((1 - ph) * 10) / 10);
       }
     }
-    // Sprechblase
+    // speech bubble
     let text = null, kind = "";
     if (c.say) { text = c.say; kind = "say"; }
-    else if (st === "working" && c.pose === "sit") text = a.state.activity;
-    else if (st === "waiting") { text = "! " + (a.state.activity || "wartet auf dich"); kind = "waiting"; }
+    else if (st === "working" && c.pose === "sit") text = tr(a.state.activity);
+    else if (st === "waiting") { text = "! " + (tr(a.state.activity) || t("say.waiting")); kind = "waiting"; }
     if (!text) continue;
     const b = label(`b:${key}`, `bubble ${kind} sz-${sz}`, trunc(text, 34));
     const ax = X(c.headX);
@@ -866,7 +873,7 @@ function updateOverlay(h, L, S, ox, oy, W) {
     for (let n = 0; n < 6; n++) {
       const hit = placed.find((q) => left < q.l + q.w + 4 && left + b.w + 4 > q.l && top < q.t + q.h + 2 && top + b.h + 2 > q.t);
       if (!hit) break;
-      top = hit.t - b.h - 6; // über die andere Blase stapeln
+      top = hit.t - b.h - 6; // stack above the other bubble
     }
     placed.push({ l: left, t: top, w: b.w, h: b.h });
     place(b, left, top);
@@ -874,12 +881,21 @@ function updateOverlay(h, L, S, ox, oy, W) {
     if (b.tx !== tx) { b.el.style.setProperty("--tx", `${tx}px`); b.tx = tx; }
   }
 
+  // neighbors: folder name above the roof, with "!" while their boss waits for you
+  for (const p of neighbors) {
+    const nh = p.h, replay = nh.id.startsWith("replay-");
+    const waiting = nh.boss && nh.boss.state.status === "waiting";
+    const text = `${waiting ? "! " : replay ? "▶ " : ""}${basename(nh.cwd)}`;
+    const l = label(`n:${nh.id}`, `plaque ${waiting ? "gold" : ""} sz-${sz}`, text);
+    place(l, Math.round((p.x + HX + HW / 2) * S - l.w / 2), Math.round((p.y + ROOF_TOP) * S) - l.h - 6);
+  }
+
   for (const [k, l] of labels) if (l.seen !== frameNo) { l.el.remove(); labels.delete(k); }
 }
 
-// ---------------------------------------------------------------- Töne (WebAudio, abschaltbar)
+// ---------------------------------------------------------------- Sounds (WebAudio, can be turned off)
 let soundOn = false;
-try { soundOn = localStorage.getItem("agent-haus-ton") === "an"; } catch { /* kein Speicher: bleibt aus */ }
+try { soundOn = localStorage.getItem("agent-haus-ton") === "an"; } catch { /* no storage: stays off */ }
 let actx = null;
 function audio() {
   if (!actx) actx = new (window.AudioContext || window.webkitAudioContext)();
@@ -919,20 +935,20 @@ let lastType = 0;
 function play(name, house) {
   if (!soundOn || (house && house.id !== currentId)) return;
   if (name === "type") { if (performance.now() - lastType < 250) return; lastType = performance.now(); }
-  try { SOUNDS[name](); } catch { /* Audio nicht verfügbar */ }
+  try { SOUNDS[name](); } catch { /* audio not available */ }
 }
 const soundBtn = document.getElementById("sound");
-function renderSoundBtn() { soundBtn.textContent = soundOn ? "Ton: an" : "Ton: aus"; soundBtn.setAttribute("aria-pressed", String(soundOn)); }
+function renderSoundBtn() { soundBtn.textContent = t("btn.sound", { on: soundOn }); soundBtn.setAttribute("aria-pressed", String(soundOn)); }
 soundBtn.addEventListener("click", () => {
   soundOn = !soundOn;
-  try { localStorage.setItem("agent-haus-ton", soundOn ? "an" : "aus"); } catch { /* egal */ }
+  try { localStorage.setItem("agent-haus-ton", soundOn ? "an" : "aus"); } catch { /* never mind */ }
   renderSoundBtn();
   if (soundOn) play("report");
 });
 renderSoundBtn();
 
-// ---------------------------------------------------------------- Zustand + Ereignisse
-const houses = new Map();
+// ---------------------------------------------------------------- State + events
+const houses = new Map(); // in order of arrival = order in the street
 let currentId = null;
 let selected = "main";
 let follow = true;
@@ -946,14 +962,14 @@ function getHouse(id, cwd) {
   if (cwd) h.cwd = cwd;
   return h;
 }
-/** Gibt dem Agent den ersten freien Raum (oder einen neuen). */
+/** Gives the agent the first free room (or a new one). */
 function assignRoom(h, a) {
   let idx = h.rooms.indexOf(null);
   if (idx < 0) { idx = h.rooms.length; h.rooms.push(a.state.key); } else h.rooms[idx] = a.state.key;
   a.room = idx;
   a.departed = false;
 }
-/** Agent ist ausgezogen: Raum wieder frei, leere Räume am Ende fallen weg. */
+/** The agent moved out: the room is free again, empty rooms at the end disappear. */
 function freeRoom(h, a) {
   if (a.room >= 0 && h.rooms[a.room] === a.state.key) h.rooms[a.room] = null;
   while (h.rooms.length && !h.rooms[h.rooms.length - 1]) h.rooms.pop();
@@ -979,12 +995,12 @@ function ensureAgent(h, state, opts = {}) {
   return { a, isNew };
 }
 function addLog(a, m) {
-  if (m.event === "PreToolUse" && /^Terminal/.test(m.text || "")) a.bash = (a.bash || 0) + 1;
+  if (m.event === "PreToolUse" && Array.isArray(m.text) && m.text[0] === "tool.bash") a.bash = (a.bash || 0) + 1;
   a.log.push({ t: m.t, text: m.text });
   if (a.log.length > 200) a.log.shift();
 }
 
-/** Figur kommt unten durch die Tür und geht in ihren Raum. Mehrere treten nacheinander ein. */
+/** The character comes in through the door at the bottom and goes to its room. Several enter one after another. */
 function enterThroughDoor(h, a, text) {
   const c = a.char;
   c.setPos(DOOR_X, -1);
@@ -1005,40 +1021,40 @@ function reportToBoss(h, a) {
   c.goto({ x: BOSS_SEAT_X - 24 - slot * 11, level: 0 });
   c.queue.push({ type: "face", dir: 1 });
   c.queue.push({ type: "call", fn: () => play("report", h) });
-  c.queue.push({ type: "say", text: "Bericht ist fertig!", t: 1.8 });
-  c.queue.push({ type: "call", fn: () => h.boss && h.boss.char.sayFor(`Danke, ${a.state.name || "du"}!`, 1.6) });
+  c.queue.push({ type: "say", text: t("say.report"), t: 1.8 });
+  c.queue.push({ type: "call", fn: () => h.boss && h.boss.char.sayFor(t("say.thanks", { name: agentName(a.state) }), 1.6) });
   c.queue.push({ type: "wait", t: 1.9 });
   moveOut(h, a);
 }
-/** Zurück in den Raum, Karton packen, mit Karton durch die Tür raus. */
+/** Back to the room, pack a box, out through the door with it. */
 function moveOut(h, a) {
   const c = a.char;
   c.queue.push({ type: "call", fn: () => { c.leaving = true; } });
   c.goto("home");
-  c.queue.push({ type: "say", text: "Ich pack zusammen.", t: 1.4 });
+  c.queue.push({ type: "say", text: t("say.pack"), t: 1.4 });
   c.queue.push({ type: "wait", t: 1.0 });
   c.queue.push({ type: "carry", on: true });
   c.queue.push({ type: "wait", t: 0.4 });
   c.goto({ x: DOOR_X, level: -1 });
-  c.queue.push({ type: "say", text: "Tschüss!", t: 1.0 });
+  c.queue.push({ type: "say", text: t("say.bye"), t: 1.0 });
   c.queue.push({ type: "wait", t: 0.6 });
   c.queue.push({ type: "exit" });
 }
 
-/** Ein Agent läuft in den Raum eines anderen, sagt seine Nachricht und geht zurück. */
+/** An agent walks into another one's room, says its message and goes back. */
 function visit(h, fromA, toA, text, ok = true) {
   const c = fromA.char, home = toA.char.home();
   const x = toA.room < 0 ? BOSS_SEAT_X - 24 : home.x - 18;
   c.goto({ x, level: home.level });
   c.queue.push({ type: "face", dir: 1 });
   c.queue.push({ type: "call", fn: () => play("knock", h) });
-  c.queue.push({ type: "say", text: text || "Kurze Frage …", t: 3.2 });
+  c.queue.push({ type: "say", text: text || t("say.question"), t: 3.2 });
   c.queue.push({ type: "wait", t: 1.2 });
   if (ok) {
-    c.queue.push({ type: "call", fn: () => toA.char.sayFor(toA.room < 0 ? "Danke, schau ich mir an!" : "Okay, mach ich!", 2.4) });
+    c.queue.push({ type: "call", fn: () => toA.char.sayFor(toA.room < 0 ? t("say.lookAt") : t("say.onIt"), 2.4) });
     c.queue.push({ type: "wait", t: 2.6 });
   } else {
-    c.queue.push({ type: "say", text: "Hm, nicht erreichbar.", t: 2.0 });
+    c.queue.push({ type: "say", text: t("say.unreachable"), t: 2.0 });
     c.queue.push({ type: "wait", t: 2.2 });
   }
   c.goto("home");
@@ -1051,17 +1067,21 @@ function onEvent(m) {
   addLog(a, m);
   h.lastAt = m.t;
   if (isNew) {
-    if (m.event === "SubagentStart") enterThroughDoor(h, a, `Auftrag: ${a.state.task || "?"}`);
-    else if (m.state.key === "main" && m.event === "SessionStart") enterThroughDoor(h, a, "Neue Session!");
+    if (m.event === "SubagentStart") enterThroughDoor(h, a, t("say.task", { task: a.state.task }));
+    else if (m.state.key === "main" && m.event === "SessionStart") enterThroughDoor(h, a, t("say.newSession"));
     else a.char.placeAtHome();
   }
   if (m.event === "PreToolUse" && !m.visit) play("type", h);
   if (m.event === "Notification") play("alert", h);
+  if (m.event === "PostToolUseFailure" && !a.char.hidden && !a.char.leaving) {
+    a.char.scratchT = 1.8;
+    a.char.sayFor(t("say.hmm"), 1.6);
+  }
   if (m.event === "SubagentStart" && !isNew) {
     if (a.departed) {
       assignRoom(h, a);
       a.char.gone = false;
-      enterThroughDoor(h, a, "Bin wieder da!");
+      enterThroughDoor(h, a, t("say.back"));
     } else if (a.char.leaving) {
       const c = a.char;
       c.queue = []; c.carry = false; c.leaving = false;
@@ -1075,13 +1095,16 @@ function onEvent(m) {
   if (m.visit) {
     const toA = h.agents.get(m.visit.to);
     if (toA && toA !== a) {
-      const nm = toA.state.name || "Agent";
-      if (toA.departed || toA.char.leaving) a.char.sayFor(m.visit.ok !== false ? `${nm}, komm bitte nochmal!` : `${nm} ist schon ausgezogen.`, 2.6);
+      const name = agentName(toA.state);
+      if (toA.departed || toA.char.leaving) a.char.sayFor(m.visit.ok !== false ? t("say.comeBack", { name }) : t("say.movedOut", { name }), 2.6);
       else visit(h, a, toA, m.visit.text, m.visit.ok !== false);
     }
   }
   if (m.event === "SessionEnd") h.ended = true;
   if (m.event === "SessionStart") h.ended = false;
+
+  if (attentionFor(m)) callForAttention(m);
+  else if (attention && attention.session === m.session && (m.event === "UserPromptSubmit" || m.event === "PreToolUse")) attention = null;
 
   if (pendingSelect === h.id) { pendingSelect = null; select(h.id, "main"); }
   else if (!currentId || (follow && currentId !== h.id && (m.event === "SessionStart" || m.event === "UserPromptSubmit"))) {
@@ -1091,32 +1114,91 @@ function onEvent(m) {
   if (h.id === currentId) renderPanel();
 }
 
+function newestHouse() { return [...houses.values()].sort((x, y) => y.lastAt - x.lastAt)[0] || null; }
+
 function onHello(m) {
   houses.clear();
   for (const s of m.sessions) {
     const h = getHouse(s.id, s.cwd);
     for (const st of s.agents) {
       const finished = st.key !== "main" && (st.status === "done" || st.status === "gone");
-      // Gerade erst fertig geworden: noch sichtbar packen und gehen, statt nach dem Neuladen einfach zu fehlen
+      // Just finished: still pack up visibly and leave, instead of simply missing after a reload
       const recent = finished && Date.now() - (st.lastAt || 0) < 90_000;
       const { a } = ensureAgent(h, st, { departed: finished && !recent });
       if (!finished || recent) a.char.placeAtHome();
       if (recent) moveOut(h, a);
       h.lastAt = Math.max(h.lastAt, st.lastAt || 0);
     }
-    h.ended = s.agents.length > 0 && s.agents.every((st) => st.status === "gone");
+    h.ended = s.ended ?? (s.agents.length > 0 && s.agents.every((st) => st.status === "gone"));
   }
   for (const ev of m.history) {
     const a = houses.get(ev.session)?.agents.get(ev.agent);
     if (a) addLog(a, ev);
   }
-  const newest = [...houses.values()].sort((x, y) => y.lastAt - x.lastAt)[0];
-  if (!currentId || !houses.has(currentId)) currentId = newest ? newest.id : null;
+  if (!currentId || !houses.has(currentId)) currentId = newestHouse()?.id ?? null;
   renderTabs();
   renderPanel();
 }
 
-// ---------------------------------------------------------------- DOM: Tabs + Panel
+/** The server forgot an old session: its house leaves the street. */
+function onForget(id) {
+  if (!houses.delete(id)) return;
+  if (attention && attention.session === id) attention = null;
+  if (currentId === id) { currentId = newestHouse()?.id ?? null; selected = "main"; }
+  renderTabs();
+  renderPanel();
+}
+
+// ---------------------------------------------------------------- Attention: blinking tab title + desktop notifications
+const BASE_TITLE = document.title;
+let attention = null; // { session, dir } while Claude waits for you and this tab is in the background
+let blinkOn = false;
+const canNotify = "Notification" in window;
+let notifyOn = false;
+try { notifyOn = canNotify && Notification.permission === "granted" && localStorage.getItem("agent-haus-notify") === "on"; } catch { /* stays off */ }
+const notifyBtn = document.getElementById("notifyBtn");
+function renderNotifyBtn() { notifyBtn.textContent = t("btn.notify", { on: notifyOn }); notifyBtn.setAttribute("aria-pressed", String(notifyOn)); }
+notifyBtn.hidden = !canNotify;
+notifyBtn.addEventListener("click", async () => {
+  if (notifyOn) notifyOn = false;
+  else {
+    let perm = Notification.permission;
+    if (perm === "default") { try { perm = await Notification.requestPermission(); } catch { perm = "denied"; } }
+    notifyOn = perm === "granted";
+    notifyBtn.title = notifyOn ? t("btn.notify.title") : t("btn.notify.denied");
+  }
+  try { localStorage.setItem("agent-haus-notify", notifyOn ? "on" : "off"); } catch { /* never mind */ }
+  renderNotifyBtn();
+});
+renderNotifyBtn();
+
+/** Claude finished its answer or needs a decision. */
+function attentionFor(m) {
+  if (m.session.startsWith("replay-")) return false;
+  if (m.event === "Notification" || m.event === "PermissionRequest") return true;
+  return m.event === "Stop" && m.agent === "main";
+}
+function callForAttention(m) {
+  if (!document.hidden) return;
+  const dir = basename(m.cwd);
+  attention = { session: m.session, dir };
+  if (!notifyOn) return;
+  try {
+    const n = new Notification(t("title.waiting", { dir }), { body: tr(m.text), tag: m.session });
+    n.onclick = () => { window.focus(); if (houses.has(m.session)) select(m.session, "main"); n.close(); };
+  } catch { /* not allowed here */ }
+}
+setInterval(() => {
+  if (attention && document.hidden) {
+    blinkOn = !blinkOn;
+    document.title = blinkOn ? t("title.waiting", { dir: attention.dir }) : BASE_TITLE;
+  } else if (document.title !== BASE_TITLE) document.title = BASE_TITLE;
+}, 1000);
+document.addEventListener("visibilitychange", () => {
+  if (!document.hidden) { attention = null; document.title = BASE_TITLE; }
+});
+
+// ---------------------------------------------------------------- DOM: tabs + panel
 const tabsEl = document.getElementById("tabs");
 const panelEl = document.getElementById("panel");
 
@@ -1128,9 +1210,12 @@ function select(id, key) {
 }
 
 function renderTabs() {
-  const list = [...houses.values()].sort((x, y) => y.lastAt - x.lastAt).slice(0, 6);
+  const list = [...houses.values()].sort((x, y) => y.lastAt - x.lastAt).slice(0, 5);
+  // folder name only; the short session id is added when two tabs share a folder
+  const dirs = new Map();
+  for (const h of list) dirs.set(basename(h.cwd), (dirs.get(basename(h.cwd)) || 0) + 1);
   if (!list.length) {
-    tabsEl.replaceChildren(el("span", { className: "hint" }, "Noch keine Session: starte claude im Ordner ~/agent-haus"));
+    tabsEl.replaceChildren(el("span", { className: "hint" }, t("hint.noSession")));
     return;
   }
   tabsEl.replaceChildren(...list.map((h, i) => {
@@ -1139,7 +1224,10 @@ function renderTabs() {
     const dot = document.createElement("span");
     dot.className = "dot " + (h.ended ? "gone" : h.boss ? h.boss.state.status : "");
     const replay = h.id.startsWith("replay-");
-    b.append(dot, `${replay ? "▶ " : ""}${basename(h.cwd)} · ${replay ? "Replay" : h.id.slice(0, 4)}`);
+    const dir = basename(h.cwd);
+    const suffix = replay ? ` · ${t("replay.tab")}` : dirs.get(dir) > 1 ? ` · ${h.id.slice(0, 4)}` : "";
+    b.append(dot, `${replay ? "▶ " : ""}${dir}${suffix}`);
+    b.title = h.cwd || "";
     b.onclick = () => { follow = i === 0; select(h.id, "main"); };
     return b;
   }));
@@ -1151,23 +1239,21 @@ function el(tag, attrs = {}, ...kids) {
   e.append(...kids.filter((k) => k != null));
   return e;
 }
-const fmtTime = (t) => new Date(t).toLocaleTimeString("de-AT", { hour12: false });
 
-/** Im Panel des Chefs: wer schon ausgezogen ist (Klick zeigt dessen Bericht und Verlauf). */
+/** In the boss panel: who has moved out already (a click shows their report and log). */
 function departedList(h, a) {
   if (a.state.key !== "main") return [];
   const gone = [...h.agents.values()].filter((o) => o.departed);
   if (!gone.length) return [];
-  return [el("h3", {}, "Ausgezogen"), el("div", { className: "gone-list" },
+  return [el("h3", {}, t("panel.departed")), el("div", { className: "gone-list" },
     ...gone.map((o) => el("button", { className: "gone", type: "button",
-      onclick: () => { selected = o.state.key; renderPanel(); } }, o.state.name || "Agent")))];
+      onclick: () => { selected = o.state.key; renderPanel(); } }, agentName(o.state))))];
 }
 function renderPanel() {
   const h = houses.get(currentId);
   const a = h && h.agents.get(selected);
   if (!a) {
-    panelEl.replaceChildren(el("p", { className: "hint" },
-      h ? "Klick auf einen Raum, um zu sehen, was der Agent macht." : "Noch keine Session. Starte claude im Ordner ~/agent-haus."));
+    panelEl.replaceChildren(el("p", { className: "hint" }, h ? t("hint.clickRoom") : t("hint.noSession")));
     return;
   }
   const st = a.state;
@@ -1177,60 +1263,74 @@ function renderPanel() {
   G = prev;
 
   const dl = el("dl", {},
-    el("dt", {}, "Typ"), el("dd", {}, st.key === "main" ? "Haupt-Agent" : st.type),
-    st.key !== "main" ? el("dt", {}, "Aufgabe") : null, st.key !== "main" ? el("dd", {}, st.task || "–") : null,
-    el("dt", {}, "Gerade"), el("dd", {}, st.activity || "–"),
-    el("dt", {}, "Tools"), el("dd", {}, String(st.tools || 0)),
+    el("dt", {}, t("panel.type")), el("dd", {}, st.key === "main" ? t("type.main") : st.type),
+    st.key !== "main" ? el("dt", {}, t("panel.task")) : null, st.key !== "main" ? el("dd", {}, st.task || "–") : null,
+    el("dt", {}, t("panel.now")), el("dd", {}, tr(st.activity) || "–"),
+    el("dt", {}, t("panel.tools")), el("dd", {}, String(st.tools || 0)),
   );
   const log = el("ul", { id: "p-log" }, ...a.log.slice(-80).map((l) =>
-    el("li", {}, el("time", {}, fmtTime(l.t)), l.text)));
+    el("li", {}, el("time", {}, fmtTime(l.t)), tr(l.text))));
   panelEl.replaceChildren(...[
-    el("button", { className: "close", title: "Schließen (Esc)", onclick: closePanel }, "×"),
+    el("button", { className: "close", title: t("panel.close"), onclick: closePanel }, "×"),
     el("div", { className: "p-head" }, av,
       el("div", {},
-        el("h2", { id: "p-name" }, st.name || "Agent"),
+        el("h2", { id: "p-name" }, agentName(st)),
         el("div", { id: "p-meta" }, el("span", { className: "dot " + st.status }),
-          a.departed ? "ausgezogen" : STATUS_LABEL[st.status] || st.status))),
+          a.departed ? t("status.departed") : t(`status.${st.status}`)))),
     dl,
-    st.result ? el("h3", {}, "Letzte Antwort") : null,
+    st.result ? el("h3", {}, t("panel.lastAnswer")) : null,
     st.result ? el("p", { id: "p-result" }, st.result) : null,
     ...departedList(h, a),
-    el("h3", {}, "Verlauf"),
+    el("h3", {}, t("panel.log")),
     log,
   ].filter(Boolean));
   panelEl.scrollTop = panelEl.scrollHeight;
 }
 
-// ---------------------------------------------------------------- Rendern
+// ---------------------------------------------------------------- Rendering
+// All houses stand side by side in a street. The camera zooms onto the current house and pans to the next one.
 const view = document.getElementById("view");
 const vctx = view.getContext("2d");
 const low = makeCanvas(LW, 100);
 const lctx = low.getContext("2d");
 const placeholder = new House("none", "");
-const TOP = 52; // Platz für die Kopfzeile (CSS-Pixel)
-let hits = [];
-let cam = { S: 1, ox: 0, oy: 0 };
-let camS = 0, camX = 0; // geglättete Kamera (Zoom + Mitte in CSS-Pixeln)
+// room for the header (CSS pixels); it can wrap onto two lines on narrow screens
+let TOP = 52;
+const headerEl = document.querySelector("header");
+new ResizeObserver(() => { TOP = Math.max(52, headerEl.offsetHeight + 2); }).observe(headerEl);
+const STREET_GAP = 40;     // game pixels between two houses
+const STRIDE = LW + STREET_GAP;
+let hits = [];             // clickable areas in screen game pixels
+let cam = { S: 1 };
+let camS = 0, camX = 0, camH = 0, camWX = 0; // smoothed camera: zoom, screen center (CSS px), house height, street position
 let skyCache = null, skyKey = "";
 
 function render(dt = 0) {
   const h = houses.get(currentId) || placeholder;
+  const street = houses.has(h.id) ? [...houses.values()] : [placeholder];
+  const ci = Math.max(0, street.indexOf(h));
   const L = h.layout();
   const vw = window.innerWidth, vh = window.innerHeight;
 
-  // Haus so groß wie möglich einpassen: oben die Kopfzeile, rechts ggf. das offene Panel frei lassen
+  // Fit the house as large as possible: header at the top, room for the open panel on the right
   const side = panelOpen && vw > 900 ? 372 : 0;
   const tS = Math.max(0.5, Math.min((vw - side - 24) / LW, (vh - TOP - 12) / L.H));
   const tX = (vw - side) / 2;
-  const k = camS === 0 ? 1 : 1 - Math.exp(-dt * 9);
-  camS += (tS - camS) * k; camX += (tX - camX) * k;
+  const tWX = ci * STRIDE + LW / 2;
+  const first = camS === 0;
+  const k = first ? 1 : 1 - Math.exp(-dt * 9);
+  const kPan = first ? 1 : 1 - Math.exp(-dt * 5);
+  camS += (tS - camS) * k; camX += (tX - camX) * k; camH += (L.H - camH) * k; camWX += (tWX - camWX) * kPan;
   if (Math.abs(tS - camS) < 0.002) camS = tS;
   if (Math.abs(tX - camX) < 0.5) camX = tX;
+  if (Math.abs(L.H - camH) < 0.2) camH = L.H;
+  if (Math.abs(tWX - camWX) < 0.3) camWX = tWX;
   const S = camS;
+  cam = { S };
   const WW = Math.ceil(vw / S), WH = Math.ceil(vh / S);
-  const ox = Math.floor(camX / S - LW / 2);
-  const oy = Math.floor(TOP / S + ((vh - TOP) / S - L.H) / 2);
-  cam = { S, ox, oy };
+  // All houses share one ground line: the current house sits centered below the header.
+  const groundY = Math.round(TOP / S + ((vh - TOP) / S - camH) / 2 + camH - 30);
+  const x0 = Math.floor(camX / S - camWX); // where the street starts on screen
 
   const dpr = window.devicePixelRatio || 1;
   const cw = Math.round(vw * dpr), ch = Math.round(vh * dpr);
@@ -1240,12 +1340,12 @@ function render(dt = 0) {
   }
   if (low.width !== WW || low.height !== WH) { low.width = WW; low.height = WH; }
 
-  // Himmel (gecacht, solange sich Größe und Lage nicht ändern)
-  const groundY = oy + L.groundY;
-  let moonX = Math.min(WW - 24 - Math.ceil(side / S), ox + LW + 46), moonY = Math.max(oy + 18, Math.round(TOP / S) + 14);
+  // sky (cached as long as size and position stay the same)
+  const cx = Math.round(camX / S);
+  let moonX = Math.min(WW - 24 - Math.ceil(side / S), cx + LW / 2 + 46), moonY = Math.max(groundY - L.H + 48, Math.round(TOP / S) + 14);
   if (PH().body === "sunLow") {
     moonY = groundY - 38;
-    if (phaseName === "morgen") moonX = Math.max(24, ox - 46);
+    if (phaseName === "morning") moonX = Math.max(24, cx - LW / 2 - 46);
   }
   const sk = `${WW}x${WH}:${groundY}:${moonX}:${moonY}:${phaseName}`;
   if (skyKey !== sk) {
@@ -1254,34 +1354,51 @@ function render(dt = 0) {
     drawSky(WW, WH, groundY, moonX, moonY);
     skyKey = sk;
   }
-  // Haus (gecacht pro Stockwerkszahl)
-  const key = `${L.floors}:${h.rooms.map((k) => k || "-").join(",")}:${phaseName}`;
-  if (!h.bg || h.bgKey !== key) {
-    h.bg = makeCanvas(LW, L.H);
-    G = h.bg.getContext("2d");
-    drawStatic(h, L);
-    h.bgKey = key;
-  }
 
   G = lctx;
   G.drawImage(skyCache, 0, 0);
   drawClouds(WW, groundY);
-  // funkelnde Sterne (nur nachts)
+  // twinkling stars (night only)
   const rnd = rng32(99);
-  for (let i = 0; i < (phaseName === "nacht" ? WW / 25 : 0); i++) {
+  for (let i = 0; i < (phaseName === "night" ? WW / 25 : 0); i++) {
     const x = rnd() * WW, y = rnd() * (groundY * 0.55), ph = rnd() * 6;
     if (Math.sin(T * 2 + ph) > 0.6) P(x, y, "#ffffff");
   }
-  G.save();
-  G.translate(ox, oy);
-  G.drawImage(h.bg, 0, 0);
+
   hits = [];
-  drawDynamic(h, L, hits);
-  G.restore();
+  const neighbors = [];
+  let ox = 0, oy = 0;
+  street.forEach((sh, i) => {
+    const Ls = sh.layout();
+    const x = x0 + i * STRIDE, y = groundY - Ls.groundY;
+    if (x > WW || x + LW < 0) return; // off screen
+    // house (cached per floor count and room assignment)
+    const key = `${Ls.floors}:${sh.rooms.map((r) => r || "-").join(",")}:${phaseName}`;
+    if (!sh.bg || sh.bgKey !== key) {
+      sh.bg = makeCanvas(LW, Ls.H);
+      G = sh.bg.getContext("2d");
+      drawStatic(sh, Ls);
+      sh.bgKey = key;
+      G = lctx;
+    }
+    G.save();
+    G.translate(x, y);
+    G.drawImage(sh.bg, 0, 0);
+    const local = [];
+    drawDynamic(sh, Ls, local);
+    G.restore();
+    if (sh === h) {
+      ox = x; oy = y;
+      for (const r of local) hits.push({ ...r, x: r.x + x, y: r.y + y });
+    } else {
+      hits.push({ x: x + HX, y: y + ROOF_TOP, w: HW, h: Ls.groundY - ROOF_TOP, house: sh.id });
+      neighbors.push({ h: sh, x, y });
+    }
+  });
 
   vctx.imageSmoothingEnabled = false;
   vctx.drawImage(low, 0, 0, WW, WH, 0, 0, Math.round(WW * S * dpr), Math.round(WH * S * dpr));
-  updateOverlay(h, L, S, ox, oy, vw);
+  updateOverlay(h, L, S, ox, oy, vw, neighbors);
 }
 
 let last = performance.now();
@@ -1296,12 +1413,15 @@ function frame(now) {
 requestAnimationFrame(frame);
 
 function hitAt(ev) {
-  const x = ev.clientX / cam.S - cam.ox, y = ev.clientY / cam.S - cam.oy;
+  const x = ev.clientX / cam.S, y = ev.clientY / cam.S;
   return hits.find((hh) => x >= hh.x && x < hh.x + hh.w && y >= hh.y && y < hh.y + hh.h);
 }
 view.addEventListener("click", (ev) => {
   const hit = hitAt(ev);
-  if (hit) { selected = hit.key; openPanel(); }
+  if (!hit) return;
+  if (hit.house) { follow = false; select(hit.house, "main"); return; }
+  selected = hit.key;
+  openPanel();
 });
 view.addEventListener("mousemove", (ev) => { view.style.cursor = hitAt(ev) ? "pointer" : "default"; });
 window.addEventListener("keydown", (ev) => { if (ev.key === "Escape") { closePanel(); replayMenu.hidden = true; } });
@@ -1311,25 +1431,25 @@ const replayBtn = document.getElementById("replayBtn");
 const replayMenu = document.getElementById("replayMenu");
 let replaySpeed = 4;
 let pendingSelect = null;
-const fmtDate = (t) => new Date(t).toLocaleString("de-AT", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" });
+const fmtDate = (ts) => new Date(ts).toLocaleString(LANG === "de" ? "de-AT" : "en-GB", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" });
 const fmtDur = (ms) => (ms < 60000 ? `${Math.max(1, Math.round(ms / 1000))} s` : `${Math.round(ms / 60000)} min`);
 
 async function openReplayMenu() {
   replayMenu.hidden = false;
-  replayMenu.replaceChildren(el("p", { className: "hint" }, "lade …"));
-  let list = [];
-  try { list = await (await fetch("/api/sessions")).json(); } catch { /* Server weg */ }
-  const speed = el("select", { title: "Tempo", onchange: (e) => { replaySpeed = Number(e.target.value); } },
+  replayMenu.replaceChildren(el("p", { className: "hint" }, t("replay.loading")));
+  let data = { logging: true, sessions: [] };
+  try { data = await (await fetch("/api/sessions")).json(); } catch { /* server gone */ }
+  const speed = el("select", { title: t("replay.speed"), onchange: (e) => { replaySpeed = Number(e.target.value); } },
     ...[2, 4, 10].map((v) => el("option", { value: String(v), selected: v === replaySpeed }, `${v}×`)));
-  const items = list.map((s) => el("button", { className: "item", type: "button", onclick: () => runReplay(s.id) },
+  const items = (data.sessions || []).map((s) => el("button", { className: "item", type: "button", onclick: () => runReplay(s.id) },
     el("div", {}, `${basename(s.cwd)} · ${s.id.slice(0, 4)}`),
     el("div", { className: "sub" }, [
-      s.first ? fmtDate(s.first) : "ohne Zeitstempel",
-      `${s.agents} Subagent${s.agents === 1 ? "" : "s"}`,
-      s.first && s.last ? fmtDur(s.last - s.first) : `${s.events} Ereignisse`,
+      s.first ? fmtDate(s.first) : t("replay.noTime"),
+      t("replay.subagents", { n: s.agents }),
+      s.first && s.last ? fmtDur(s.last - s.first) : t("replay.events", { n: s.events }),
     ].join(" · "))));
-  replayMenu.replaceChildren(el("h4", {}, "Session abspielen", speed),
-    ...(items.length ? items : [el("p", { className: "hint" }, "Noch keine gespeicherten Sessions.")]));
+  const empty = el("p", { className: "hint" }, data.logging === false ? t("replay.off") : t("replay.none"));
+  replayMenu.replaceChildren(el("h4", {}, t("replay.title"), speed), ...(items.length ? items : [empty]));
 }
 async function runReplay(id) {
   replayMenu.hidden = true;
@@ -1337,21 +1457,21 @@ async function runReplay(id) {
     const r = await fetch("/api/replay", { method: "POST", headers: { "content-type": "application/json" },
       body: JSON.stringify({ session: id, speed: replaySpeed }) });
     if (r.ok) { pendingSelect = (await r.json()).id; follow = true; }
-  } catch { /* Server weg */ }
+  } catch { /* server gone */ }
 }
 replayBtn.addEventListener("click", () => { if (replayMenu.hidden) openReplayMenu(); else replayMenu.hidden = true; });
 document.addEventListener("click", (ev) => {
   if (!replayMenu.hidden && !replayMenu.contains(ev.target) && ev.target !== replayBtn) replayMenu.hidden = true;
 });
 
-// ---------------------------------------------------------------- Rückfragen im Haus beantworten
+// ---------------------------------------------------------------- Answering permission requests in the house
 const permBtn = document.getElementById("permBtn");
 const permsEl = document.getElementById("perms");
 let answerInHouse = false;
 const permCards = new Map(); // id -> { el, info, left }
 
 function renderPermBtn() {
-  permBtn.textContent = `Erlauben im Haus: ${answerInHouse ? "an" : "aus"}`;
+  permBtn.textContent = t("btn.perm", { on: answerInHouse });
   permBtn.setAttribute("aria-pressed", String(answerInHouse));
 }
 permBtn.addEventListener("click", async () => {
@@ -1359,7 +1479,7 @@ permBtn.addEventListener("click", async () => {
     const r = await fetch("/api/settings", { method: "POST", headers: { "content-type": "application/json" },
       body: JSON.stringify({ answerInHouse: !answerInHouse }) });
     if (r.ok) { answerInHouse = (await r.json()).answerInHouse; renderPermBtn(); }
-  } catch { /* Server weg */ }
+  } catch { /* server gone */ }
 });
 
 function addPermCard(info) {
@@ -1372,12 +1492,12 @@ function addPermCard(info) {
         body: JSON.stringify({ id: info.id, decision }) });
     } catch { allow.disabled = deny.disabled = false; }
   };
-  const allow = el("button", { className: "allow", type: "button", onclick: () => decide("allow") }, "Erlauben");
-  const deny = el("button", { className: "deny", type: "button", onclick: () => decide("deny") }, "Ablehnen");
+  const allow = el("button", { className: "allow", type: "button", onclick: () => decide("allow") }, t("perm.allow"));
+  const deny = el("button", { className: "deny", type: "button", onclick: () => decide("deny") }, t("perm.deny"));
   const card = el("div", { className: "perm", role: "alertdialog" },
-    el("div", { className: "perm-title", title: "Zum Agent springen",
+    el("div", { className: "perm-title", title: t("perm.jump"),
       onclick: () => { if (houses.has(info.session)) { select(info.session, info.agent); openPanel(); } } },
-      el("b", {}, info.name), `möchte: ${info.what}`),
+      el("b", {}, tr(info.who)), t("perm.wants", { x: info.tool })),
     el("code", {}, info.detail),
     el("div", { className: "perm-where" }, basename(info.cwd)),
     el("div", { className: "perm-actions" }, allow, deny, left));
@@ -1393,17 +1513,31 @@ function removePermCard(id) {
 function tickPermCards() {
   for (const c of permCards.values()) {
     const s = Math.max(0, Math.round((c.info.expiresAt - Date.now()) / 1000));
-    c.left.textContent = s > 0 ? `noch ${s} s, dann im Terminal` : "läuft ab …";
+    c.left.textContent = s > 0 ? t("perm.left", { s }) : t("perm.expiring");
   }
 }
 setInterval(tickPermCards, 1000);
 renderPermBtn();
 
-// ---------------------------------------------------------------- Verbindung
+// ---------------------------------------------------------------- Static texts + tab icon
+applyStaticTexts();
+(function favicon() {
+  try {
+    const c = makeCanvas(16, 16), prev = G;
+    G = c.getContext("2d");
+    drawSprite(2, 3, { hue: 28, acc: "crown", eyes: "open", feet: "stand" });
+    G = prev;
+    const link = document.createElement("link");
+    link.rel = "icon"; link.href = c.toDataURL();
+    document.head.append(link);
+  } catch { /* no icon then */ }
+})();
+
+// ---------------------------------------------------------------- Connection
 const conn = document.getElementById("conn");
 const es = new EventSource("/stream");
-es.onopen = () => { conn.textContent = "live"; conn.className = "on"; };
-es.onerror = () => { conn.textContent = "Verbindung weg, versuche neu …"; conn.className = ""; };
+es.onopen = () => { conn.textContent = t("conn.live"); conn.className = "on"; };
+es.onerror = () => { conn.textContent = t("conn.lost"); conn.className = ""; };
 es.onmessage = (ev) => {
   const m = JSON.parse(ev.data);
   if (m.kind === "reload") { location.reload(); return; }
@@ -1417,5 +1551,6 @@ es.onmessage = (ev) => {
   else if (m.kind === "settings") { answerInHouse = !!m.settings.answerInHouse; renderPermBtn(); }
   else if (m.kind === "permission") addPermCard(m);
   else if (m.kind === "permission-done") removePermCard(m.id);
+  else if (m.kind === "forget") onForget(m.session);
   else if (m.kind === "event") onEvent(m);
 };

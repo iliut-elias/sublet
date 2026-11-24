@@ -1,13 +1,13 @@
 <!doctype html>
-<html lang="de">
+<html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Agent-Haus</title>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Silkscreen&family=VT323&display=swap" rel="stylesheet">
 <style>
+  /* Pixel fonts shipped with the app (SIL Open Font License, see fonts/OFL-*.txt) */
+  @font-face { font-family: Silkscreen; src: url("/fonts/Silkscreen-Regular.ttf") format("truetype"); font-display: swap; }
+  @font-face { font-family: VT323; src: url("/fonts/VT323-Regular.ttf") format("truetype"); font-display: swap; }
   :root {
     --bg: #060914; --panel: rgba(13, 19, 38, 0.985); --line: #26355a; --text: #dfe6f5; --muted: #8e9cbd;
     --accent: #6ea8ff; --working: #6ee7a8; --waiting: #ffd166; --gone: #5a6688;
@@ -16,11 +16,11 @@
   html, body { height: 100%; margin: 0; overflow: hidden; }
   body { background: var(--bg); color: var(--text); font: 14px/1.45 system-ui, sans-serif; }
 
-  /* Szene über den ganzen Bildschirm */
+  /* scene across the whole screen */
   #view { position: fixed; inset: 0; display: block; image-rendering: pixelated; }
   #overlay { position: fixed; inset: 0; pointer-events: none; overflow: hidden; }
 
-  /* Kopfzeile schwebt über dem Himmel */
+  /* header floats above the sky */
   header { position: fixed; top: 0; left: 0; right: 0; z-index: 2; display: flex; align-items: center; gap: 14px;
            padding: 10px 16px 18px; flex-wrap: wrap;
            background: linear-gradient(rgba(6, 9, 20, 0.85), rgba(6, 9, 20, 0)); }
@@ -50,7 +50,7 @@
   .menu .sub { color: var(--muted); font-size: 12px; }
   #permBtn[aria-pressed="true"] { color: #141826; background: var(--waiting); border-color: var(--waiting); }
 
-  /* Rückfragen-Karten */
+  /* permission cards */
   #perms { position: fixed; z-index: 5; left: 0; right: 0; bottom: 16px; margin: 0 auto; width: min(480px, calc(100vw - 32px));
            display: flex; flex-direction: column; gap: 8px; pointer-events: none; }
   .perm { pointer-events: auto; background: var(--panel); border: 2px solid var(--waiting); border-radius: 10px; padding: 12px 14px;
@@ -58,7 +58,7 @@
   .perm-title { font-size: 14px; margin-bottom: 6px; cursor: pointer; }
   .perm-title b { font: 13px Silkscreen, monospace; color: var(--waiting); margin-right: 4px; }
   .perm code { display: block; font: 12px/1.45 ui-monospace, monospace; background: #0a0f1f; color: #dfe6f5; padding: 6px 8px;
-               border-radius: 6px; white-space: pre-wrap; word-break: break-all; max-height: 120px; overflow: auto; }
+               border-radius: 6px; white-space: pre-wrap; word-break: break-all; max-height: 160px; overflow: auto; }
   .perm-where { color: var(--muted); font-size: 12px; margin-top: 6px; }
   .perm-actions { display: flex; gap: 8px; align-items: center; margin-top: 10px; }
   .perm-actions button { border: 0; border-radius: 6px; padding: 6px 14px; font: 600 13px system-ui, sans-serif; cursor: pointer; }
@@ -71,7 +71,7 @@
   .dot.waiting { background: var(--waiting); }
   .dot.done, .dot.gone { background: var(--gone); }
 
-  /* Texte im Haus (HTML statt Canvas, damit sie scharf sind) */
+  /* texts in the house (HTML instead of canvas, so they stay sharp) */
   .lbl { position: absolute; left: 0; top: 0; white-space: nowrap; }
   .plaque { font-family: Silkscreen, monospace; color: #dfe6f5; background: rgba(10, 14, 28, 0.88); line-height: 1; }
   .plaque.gold { color: #ffd166; }
@@ -90,7 +90,7 @@
   .bubble::after { content: ""; position: absolute; top: 100%; left: var(--tx, 50%); width: 4px; height: 4px;
                    background: #141826; box-shadow: 2px 2px 0 #141826; }
 
-  /* Panel: schwebende Karte, öffnet per Klick auf einen Raum */
+  /* panel: floating card, opens with a click on a room */
   #panel { position: fixed; z-index: 3; right: 16px; top: 56px; bottom: 16px; width: 340px; display: none;
            overflow: auto; padding: 16px; background: var(--panel); border: 1px solid var(--line); border-radius: 12px;
            box-shadow: 0 12px 40px rgba(0, 0, 0, 0.45); }
@@ -123,21 +123,22 @@
 </style>
 </head>
 <body>
-<canvas id="view" aria-label="Agent-Haus: Pixel-Ansicht der laufenden Claude-Code-Agents" role="img"></canvas>
+<canvas id="view" data-i18n-label="page.label" role="img"></canvas>
 <div id="overlay" aria-hidden="true"></div>
 <header>
   <h1>Agent-Haus</h1>
   <nav id="tabs"></nav>
-  <span id="conn" aria-live="polite">verbinde …</span>
-  <button id="replayBtn" class="hbtn" type="button" aria-haspopup="true">Replay</button>
-  <button id="permBtn" class="hbtn" type="button" aria-pressed="false"
-          title="Rückfragen von Claude (Berechtigungen) hier im Haus beantworten. Achtung: Jedes Programm auf diesem Rechner, das HTTP-Anfragen an 127.0.0.1 schicken kann, könnte dann auch antworten. Nach einem Server-Neustart wieder aus.">Erlauben im Haus: aus</button>
-  <button id="sound" class="hbtn" type="button" title="Töne an/aus">Ton: aus</button>
-  <a href="/text.html">Textansicht</a>
+  <span id="conn" aria-live="polite" data-i18n="conn.connecting"></span>
+  <button id="replayBtn" class="hbtn" type="button" aria-haspopup="true" data-i18n="btn.replay"></button>
+  <button id="notifyBtn" class="hbtn" type="button" aria-pressed="false" data-i18n-title="btn.notify.title"></button>
+  <button id="permBtn" class="hbtn" type="button" aria-pressed="false" data-i18n-title="btn.perm.title"></button>
+  <button id="sound" class="hbtn" type="button" data-i18n-title="btn.sound.title"></button>
+  <a href="/text.html" data-i18n="link.text"></a>
 </header>
-<aside id="panel" aria-label="Details zum Agent"></aside>
+<aside id="panel"></aside>
 <div id="replayMenu" class="menu" hidden></div>
 <div id="perms" aria-live="assertive"></div>
+<script src="/i18n.js"></script>
 <script src="/haus.js"></script>
 </body>
 </html>

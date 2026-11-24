@@ -1,2 +1,3 @@
 data/
-probe/events.jsonl
+node_modules/
+*.log

@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="de">
+<html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -38,17 +38,18 @@
 </head>
 <body>
 <header>
-  <h1>Agent-Haus</h1> <a href="/" style="color:var(--muted);font-size:12px">zum Haus</a>
-  <span id="conn">verbinde …</span>
+  <h1>Agent-Haus</h1> <a href="/" style="color:var(--muted);font-size:12px" data-i18n="link.house"></a>
+  <span id="conn" data-i18n="conn.connecting"></span>
 </header>
-<main id="root"><p class="empty">Noch keine Ereignisse. Starte eine Claude-Code-Session in ~/agent-haus.</p></main>
+<main id="root"><p class="empty" data-i18n="text.empty"></p></main>
+<script src="/i18n.js"></script>
 <script>
   const root = document.getElementById("root");
   const conn = document.getElementById("conn");
   /** sessionId -> { cwd, agents: Map<key, {state, log: []}> } */
   const sessions = new Map();
 
-  const fmt = (t) => new Date(t).toLocaleTimeString("de-AT", { hour12: false });
+  applyStaticTexts();
 
   function upsert(sessionId, cwd, state) {
     let s = sessions.get(sessionId);
@@ -87,15 +88,15 @@
         const card = el("article", `agent ${st.status} ${st.key === "main" ? "main" : ""}`);
         const head = el("div", "head");
         head.append(el("span", "dot"),
-          el("span", "name", st.name || (st.key === "main" ? "Haupt-Agent" : `Agent ${st.key.slice(0, 6)}`)),
+          el("span", "name", agentName(st)),
           el("span", "type", st.type));
         card.append(head);
         if (st.key !== "main") card.append(el("div", "task", st.task || ""));
-        card.append(el("div", "activity", st.activity || ""));
+        card.append(el("div", "activity", tr(st.activity)));
         const log = el("ul", "log");
         for (const l of a.log.slice(-40)) {
           const li = el("li");
-          li.append(el("time", null, fmt(l.t)), document.createTextNode(l.text));
+          li.append(el("time", null, fmtTime(l.t)), document.createTextNode(tr(l.text)));
           log.append(li);
         }
         card.append(log);
@@ -108,8 +109,8 @@
   }
 
   const es = new EventSource("/stream");
-  es.onopen = () => { conn.textContent = "live"; conn.className = "on"; };
-  es.onerror = () => { conn.textContent = "Verbindung weg, versuche neu …"; conn.className = ""; };
+  es.onopen = () => { conn.textContent = t("conn.live"); conn.className = "on"; };
+  es.onerror = () => { conn.textContent = t("conn.lost"); conn.className = ""; };
   es.onmessage = (ev) => {
     const m = JSON.parse(ev.data);
     if (m.kind === "hello") {
@@ -118,6 +119,12 @@
       for (const s of m.sessions) for (const st of s.agents) upsert(s.id, s.cwd, st);
     } else if (m.kind === "event") {
       addEvent(m);
+    } else if (m.kind === "forget") {
+      sessions.delete(m.session);
+      if (!sessions.size) { root.replaceChildren(el("p", "empty", t("text.empty"))); return; }
+    } else if (m.kind === "reload") {
+      location.reload();
+      return;
     }
     render();
   };
