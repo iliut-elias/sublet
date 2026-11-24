@@ -1096,9 +1096,12 @@ function onHello(m) {
   for (const s of m.sessions) {
     const h = getHouse(s.id, s.cwd);
     for (const st of s.agents) {
-      const departed = st.key !== "main" && (st.status === "done" || st.status === "gone");
-      const { a } = ensureAgent(h, st, { departed });
-      if (!departed) a.char.placeAtHome();
+      const finished = st.key !== "main" && (st.status === "done" || st.status === "gone");
+      // Gerade erst fertig geworden: noch sichtbar packen und gehen, statt nach dem Neuladen einfach zu fehlen
+      const recent = finished && Date.now() - (st.lastAt || 0) < 90_000;
+      const { a } = ensureAgent(h, st, { departed: finished && !recent });
+      if (!finished || recent) a.char.placeAtHome();
+      if (recent) moveOut(h, a);
       h.lastAt = Math.max(h.lastAt, st.lastAt || 0);
     }
     h.ended = s.agents.length > 0 && s.agents.every((st) => st.status === "gone");
