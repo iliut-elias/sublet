@@ -49,7 +49,7 @@ More details:
 - **Names:** Claude gives every subagent a nickname (the plugin asks for it when a session starts). Without one, the house uses a fallback like “Scout 1”.
 - **Furniture by type:** Explore agents get a map, Plan agents a whiteboard, everyone else a picture. Agents that use the terminal a lot get a second screen.
 - **Time of day:** night, morning, day and evening follow your clock.
-- **The street:** click a neighbor house or a tab to walk over. Old sessions leave after a while (ended ones after an hour, idle ones after six).
+- **The street:** swipe sideways with two fingers on the touchpad, press ← / →, or click a neighbor house or a tab to walk over. Old sessions leave after a while (ended ones after an hour, idle ones after six).
 - **Replay:** plays a stored session in fast motion as its own house.
 - **Notify:** when Claude is waiting for you and the tab is in the background, the tab title blinks. With “Notify: on” you also get a desktop notification.
 - **Sound:** off by default.

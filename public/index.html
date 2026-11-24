@@ -13,7 +13,7 @@
     --accent: #6ea8ff; --working: #6ee7a8; --waiting: #ffd166; --gone: #5a6688;
   }
   * { box-sizing: border-box; }
-  html, body { height: 100%; margin: 0; overflow: hidden; }
+  html, body { height: 100%; margin: 0; overflow: hidden; overscroll-behavior: none; } /* no swipe-back of the browser */
   body { background: var(--bg); color: var(--text); font: 14px/1.45 system-ui, sans-serif; }
 
   /* scene across the whole screen */

@@ -1934,6 +1934,37 @@ view.addEventListener("click", (ev) => {
 view.addEventListener("mousemove", (ev) => { view.style.cursor = hitAt(ev) ? "pointer" : "default"; });
 window.addEventListener("keydown", (ev) => { if (ev.key === "Escape") { closePanel(); replayMenu.hidden = true; } });
 
+// ---------------------------------------------------------------- Walking along the street: touchpad swipe and arrow keys
+/** Jumps to the house left (-1) or right (+1) of the current one. */
+function goNeighbor(dir) {
+  const street = [...houses.keys()];
+  const i = street.indexOf(currentId), j = i + dir;
+  if (i < 0 || j < 0 || j >= street.length) return false;
+  follow = false;
+  select(street[j], "main");
+  return true;
+}
+const SWIPE_DISTANCE = 60; // pixels of sideways scrolling for one house
+let swipeSum = 0, swipeLocked = false, swipeQuiet = null;
+window.addEventListener("wheel", (ev) => {
+  const dx = ev.deltaX * (ev.deltaMode === 1 ? 16 : ev.deltaMode === 2 ? window.innerWidth : 1);
+  if (Math.abs(dx) <= Math.abs(ev.deltaY)) return; // vertical scrolling (panel, menus) stays as it is
+  ev.preventDefault(); // and the browser does not go "back"
+  clearTimeout(swipeQuiet);
+  swipeQuiet = setTimeout(() => { swipeSum = 0; swipeLocked = false; }, 250); // a short pause ends the swipe
+  if (swipeLocked) return; // one house per swipe, even while the touchpad keeps scrolling on its own
+  swipeSum += dx;
+  if (Math.abs(swipeSum) >= SWIPE_DISTANCE) {
+    goNeighbor(Math.sign(swipeSum));
+    swipeLocked = true;
+    swipeSum = 0;
+  }
+}, { passive: false });
+window.addEventListener("keydown", (ev) => {
+  if ((ev.key !== "ArrowLeft" && ev.key !== "ArrowRight") || ev.target.closest?.("select, input, textarea")) return;
+  if (goNeighbor(ev.key === "ArrowRight" ? 1 : -1)) ev.preventDefault();
+});
+
 // ---------------------------------------------------------------- Replay
 const replayBtn = document.getElementById("replayBtn");
 const replayMenu = document.getElementById("replayMenu");
