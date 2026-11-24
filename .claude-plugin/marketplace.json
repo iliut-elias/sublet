@@ -1,0 +1,31 @@
+{
+  "name": "agent-haus",
+  "description": "Agent-Haus: watch your Claude Code sessions live as a pixel house.",
+  "owner": {
+    "name": "Elias Iliut",
+    "url": "https://github.com/iliut-elias"
+  },
+  "plugins": [
+    {
+      "name": "agent-haus",
+      "source": "./",
+      "description": "Watch your Claude Code sessions live as a pixel house: the main agent works on the top floor, every subagent moves into its own room, visits others, reports back and moves out.",
+      "version": "1.0.0",
+      "category": "productivity",
+      "author": {
+        "name": "Elias Iliut",
+        "url": "https://github.com/iliut-elias"
+      },
+      "homepage": "https://github.com/iliut-elias/agent-haus",
+      "repository": "https://github.com/iliut-elias/agent-haus",
+      "license": "MIT",
+      "keywords": [
+        "subagents",
+        "visualization",
+        "hooks",
+        "pixel-art",
+        "dashboard"
+      ]
+    }
+  ]
+}
