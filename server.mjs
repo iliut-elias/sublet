@@ -64,8 +64,20 @@ function describeTool(name, input = {}) {
       return `beauftragt ${who || "Agent"}: ${task}`;
     }
     case "TodoWrite": return "plant Aufgaben";
+    case "SendMessage": return `schreibt: ${short(input.summary || input.message, 60)}`;
     default: return name;
   }
+}
+
+/** Findet den Empfänger einer SendMessage: per Agent-ID, Name oder als Haupt-Agent. */
+function resolveAgent(s, to) {
+  if (!to) return null;
+  const t = String(to).toLowerCase();
+  for (const a of s.agents.values()) {
+    if (a.key.toLowerCase() === t || (a.name && a.name.toLowerCase() === t)) return a;
+  }
+  if (["main", "lead", "team-lead", "leader", "haupt-agent", "chef"].includes(t)) return s.agents.get("main") || null;
+  return null;
 }
 
 function getSession(e) {
@@ -103,8 +115,10 @@ function ingest(e) {
   const s = getSession(e);
   const ev = e.hook_event_name;
   const now = Date.now();
+  const existed = s.agents.has(e.agent_id || "main");
   let a = getAgent(s, e);
   let text = "";
+  let visit = null;
 
   switch (ev) {
     case "SessionStart":
@@ -121,6 +135,16 @@ function ingest(e) {
       a.activity = describeTool(e.tool_name, e.tool_input);
       a.tools++;
       text = a.activity;
+      if (e.tool_name === "SendMessage") {
+        const ti = e.tool_input || {};
+        const target = resolveAgent(s, ti.to || ti.recipient);
+        const what = short(ti.summary || ti.message, 60);
+        if (target && target !== a) {
+          visit = { to: target.key, text: what };
+          a.activity = `besucht ${target.name || "Agent"}: ${what}`;
+          text = a.activity;
+        }
+      }
       if ((e.tool_name === "Agent" || e.tool_name === "Task") && !e.agent_id) {
         s.pendingTasks.push(parseTask(e.tool_input?.description || e.tool_input?.prompt));
       }
@@ -135,6 +159,13 @@ function ingest(e) {
       a.activity = "denkt nach";
       break;
     case "SubagentStart": {
+      if (existed && a.name) {
+        // derselbe Agent macht weiter (z. B. nach einer SendMessage): Name und Aufgabe bleiben
+        a.status = "working";
+        a.activity = "macht weiter";
+        text = `${a.name} macht weiter`;
+        break;
+      }
       // Kein tool_use_id im Ereignis: Aufgabe über die Reihenfolge der Agent-Aufrufe zuordnen.
       const p = s.pendingTasks.shift();
       a.task = p?.task || a.type;
@@ -177,6 +208,7 @@ function ingest(e) {
     agent: a.key,
     event: ev,
     text,
+    visit,
     state: { ...a },
   };
 }

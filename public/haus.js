@@ -803,6 +803,19 @@ function reportToBoss(h, a) {
   c.queue.push({ type: "sit" });
 }
 
+/** Ein Agent läuft in den Raum eines anderen, sagt seine Nachricht und geht zurück. */
+function visit(h, fromA, toA, text) {
+  const c = fromA.char, home = toA.char.home();
+  const x = toA.room < 0 ? BOSS_SEAT_X - 24 : home.x - 18;
+  c.goto({ x, level: home.level });
+  c.queue.push({ type: "face", dir: 1 });
+  c.queue.push({ type: "say", text: text || "Kurze Frage …", t: 2.4 });
+  c.queue.push({ type: "call", fn: () => toA.char.sayFor(toA.room < 0 ? "Danke, schau ich mir an!" : "Okay, mach ich!", 1.8) });
+  c.queue.push({ type: "wait", t: 2.2 });
+  c.goto("home");
+  c.queue.push({ type: "sit" });
+}
+
 function onEvent(m) {
   const h = getHouse(m.session, m.cwd);
   const { a, isNew } = ensureAgent(h, m.state);
@@ -814,6 +827,10 @@ function onEvent(m) {
     else a.char.placeAtHome();
   }
   if (m.event === "SubagentStop") reportToBoss(h, a);
+  if (m.visit) {
+    const toA = h.agents.get(m.visit.to);
+    if (toA && toA !== a) visit(h, a, toA, m.visit.text);
+  }
   if (m.event === "SessionEnd") h.ended = true;
   if (m.event === "SessionStart") h.ended = false;
 
