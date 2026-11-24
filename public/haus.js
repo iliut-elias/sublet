@@ -222,7 +222,7 @@ class Char {
         case "face": this.facing = a.dir; this.queue.shift(); return;
         case "poof": this.house.poof(this.x, this.y - 6); this.queue.shift(); return;
         case "call": a.fn(); this.queue.shift(); return;
-        case "enter": this.hidden = false; this.house.doorT = 1.1; this.queue.shift(); return;
+        case "enter": this.hidden = false; this.house.doorT = 1.1; play("door", this.house); this.queue.shift(); return;
       }
     }
     this.idle(dt);
@@ -849,6 +849,60 @@ function updateOverlay(h, L, S, ox, oy, W) {
   for (const [k, l] of labels) if (l.seen !== frameNo) { l.el.remove(); labels.delete(k); }
 }
 
+// ---------------------------------------------------------------- Töne (WebAudio, abschaltbar)
+let soundOn = false;
+try { soundOn = localStorage.getItem("agent-haus-ton") === "an"; } catch { /* kein Speicher: bleibt aus */ }
+let actx = null;
+function audio() {
+  if (!actx) actx = new (window.AudioContext || window.webkitAudioContext)();
+  if (actx.state === "suspended") actx.resume();
+  return actx;
+}
+function tone(freq, start, dur, type = "sine", vol = 0.06, freqEnd = 0) {
+  const a = audio(), t0 = a.currentTime + start;
+  const o = a.createOscillator(), g = a.createGain();
+  o.type = type;
+  o.frequency.setValueAtTime(freq, t0);
+  if (freqEnd) o.frequency.exponentialRampToValueAtTime(freqEnd, t0 + dur);
+  g.gain.setValueAtTime(0.0001, t0);
+  g.gain.exponentialRampToValueAtTime(vol, t0 + 0.012);
+  g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
+  o.connect(g).connect(a.destination);
+  o.start(t0); o.stop(t0 + dur + 0.03);
+}
+function click(start, vol = 0.05) {
+  const a = audio(), t0 = a.currentTime + start, len = Math.floor(a.sampleRate * 0.018);
+  const buf = a.createBuffer(1, len, a.sampleRate), d = buf.getChannelData(0);
+  for (let i = 0; i < len; i++) d[i] = (Math.random() * 2 - 1) * (1 - i / len) ** 3;
+  const src = a.createBufferSource(), f = a.createBiquadFilter(), g = a.createGain();
+  src.buffer = buf; f.type = "highpass"; f.frequency.value = 1800; g.gain.value = vol;
+  src.connect(f).connect(g).connect(a.destination);
+  src.start(t0);
+}
+const SOUNDS = {
+  door: () => { tone(659, 0, 0.4); tone(523, 0.3, 0.6); },
+  type: () => { for (let i = 0; i < 3; i++) click(i * 0.075 + Math.random() * 0.03); },
+  report: () => { tone(523, 0, 0.14, "triangle", 0.05); tone(784, 0.11, 0.22, "triangle", 0.05); },
+  knock: () => { tone(150, 0, 0.09, "square", 0.035, 90); tone(150, 0.2, 0.09, "square", 0.035, 90); },
+  sleep: () => { tone(240, 0, 0.8, "sine", 0.035, 130); },
+  alert: () => { tone(880, 0, 0.13); tone(880, 0.2, 0.13); },
+};
+let lastType = 0;
+function play(name, house) {
+  if (!soundOn || (house && house.id !== currentId)) return;
+  if (name === "type") { if (performance.now() - lastType < 250) return; lastType = performance.now(); }
+  try { SOUNDS[name](); } catch { /* Audio nicht verfügbar */ }
+}
+const soundBtn = document.getElementById("sound");
+function renderSoundBtn() { soundBtn.textContent = soundOn ? "Ton: an" : "Ton: aus"; soundBtn.setAttribute("aria-pressed", String(soundOn)); }
+soundBtn.addEventListener("click", () => {
+  soundOn = !soundOn;
+  try { localStorage.setItem("agent-haus-ton", soundOn ? "an" : "aus"); } catch { /* egal */ }
+  renderSoundBtn();
+  if (soundOn) play("report");
+});
+renderSoundBtn();
+
 // ---------------------------------------------------------------- Zustand + Ereignisse
 const houses = new Map();
 let currentId = null;
@@ -903,11 +957,13 @@ function reportToBoss(h, a) {
   const slot = a.room % 5;
   c.goto({ x: BOSS_SEAT_X - 24 - slot * 11, level: 0 });
   c.queue.push({ type: "face", dir: 1 });
+  c.queue.push({ type: "call", fn: () => play("report", h) });
   c.queue.push({ type: "say", text: "Bericht ist fertig!", t: 1.8 });
   c.queue.push({ type: "call", fn: () => h.boss && h.boss.char.sayFor(`Danke, ${a.state.name || "du"}!`, 1.6) });
   c.queue.push({ type: "wait", t: 1.9 });
   c.goto("home");
   c.queue.push({ type: "sit" });
+  c.queue.push({ type: "call", fn: () => play("sleep", h) });
 }
 
 /** Ein Agent läuft in den Raum eines anderen, sagt seine Nachricht und geht zurück. */
@@ -916,6 +972,7 @@ function visit(h, fromA, toA, text) {
   const x = toA.room < 0 ? BOSS_SEAT_X - 24 : home.x - 18;
   c.goto({ x, level: home.level });
   c.queue.push({ type: "face", dir: 1 });
+  c.queue.push({ type: "call", fn: () => play("knock", h) });
   c.queue.push({ type: "say", text: text || "Kurze Frage …", t: 3.2 });
   c.queue.push({ type: "wait", t: 1.2 });
   c.queue.push({ type: "call", fn: () => toA.char.sayFor(toA.room < 0 ? "Danke, schau ich mir an!" : "Okay, mach ich!", 2.4) });
@@ -934,6 +991,8 @@ function onEvent(m) {
     else if (m.state.key === "main" && m.event === "SessionStart") enterThroughDoor(h, a, "Neue Session!");
     else a.char.placeAtHome();
   }
+  if (m.event === "PreToolUse" && !m.visit) play("type", h);
+  if (m.event === "Notification") play("alert", h);
   if (m.event === "SubagentStop") reportToBoss(h, a);
   if (m.visit) {
     const toA = h.agents.get(m.visit.to);

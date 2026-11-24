@@ -33,7 +33,11 @@
   #tabs .hint { color: var(--muted); font-size: 12px; }
   #conn { color: var(--muted); font-size: 12px; }
   #conn.on { color: var(--working); }
-  header a { margin-left: auto; color: var(--muted); font-size: 12px; }
+  header a { color: var(--muted); font-size: 12px; }
+  .hbtn { background: rgba(13, 19, 38, 0.7); color: var(--muted); border: 1px solid var(--line); border-radius: 6px;
+          padding: 3px 9px; font: 12px system-ui, sans-serif; cursor: pointer; }
+  .hbtn:hover, .hbtn[aria-pressed="true"] { color: var(--text); border-color: var(--accent); }
+  #sound { margin-left: auto; }
   .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); flex: none; display: inline-block; }
   .dot.working { background: var(--working); box-shadow: 0 0 6px var(--working); }
   .dot.waiting { background: var(--waiting); }
@@ -93,6 +97,7 @@
   <h1>Agent-Haus</h1>
   <nav id="tabs"></nav>
   <span id="conn" aria-live="polite">verbinde …</span>
+  <button id="sound" class="hbtn" type="button" title="Töne an/aus">Ton: aus</button>
   <a href="/text.html">Textansicht</a>
 </header>
 <aside id="panel" aria-label="Details zum Agent"></aside>
