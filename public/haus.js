@@ -1001,7 +1001,8 @@ function onEvent(m) {
   if (m.event === "SessionEnd") h.ended = true;
   if (m.event === "SessionStart") h.ended = false;
 
-  if (!currentId || (follow && currentId !== h.id && (m.event === "SessionStart" || m.event === "UserPromptSubmit"))) {
+  if (pendingSelect === h.id) { pendingSelect = null; select(h.id, "main"); }
+  else if (!currentId || (follow && currentId !== h.id && (m.event === "SessionStart" || m.event === "UserPromptSubmit"))) {
     select(h.id, "main");
   }
   renderTabs();
@@ -1051,7 +1052,8 @@ function renderTabs() {
     if (h.id === currentId) b.className = "on";
     const dot = document.createElement("span");
     dot.className = "dot " + (h.ended ? "gone" : h.boss ? h.boss.state.status : "");
-    b.append(dot, `${basename(h.cwd)} · ${h.id.slice(0, 4)}`);
+    const replay = h.id.startsWith("replay-");
+    b.append(dot, `${replay ? "▶ " : ""}${basename(h.cwd)} · ${replay ? "Replay" : h.id.slice(0, 4)}`);
     b.onclick = () => { follow = i === 0; select(h.id, "main"); };
     return b;
   }));
@@ -1205,7 +1207,100 @@ view.addEventListener("click", (ev) => {
   if (hit) { selected = hit.key; openPanel(); }
 });
 view.addEventListener("mousemove", (ev) => { view.style.cursor = hitAt(ev) ? "pointer" : "default"; });
-window.addEventListener("keydown", (ev) => { if (ev.key === "Escape") closePanel(); });
+window.addEventListener("keydown", (ev) => { if (ev.key === "Escape") { closePanel(); replayMenu.hidden = true; } });
+
+// ---------------------------------------------------------------- Replay
+const replayBtn = document.getElementById("replayBtn");
+const replayMenu = document.getElementById("replayMenu");
+let replaySpeed = 4;
+let pendingSelect = null;
+const fmtDate = (t) => new Date(t).toLocaleString("de-AT", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" });
+const fmtDur = (ms) => (ms < 60000 ? `${Math.max(1, Math.round(ms / 1000))} s` : `${Math.round(ms / 60000)} min`);
+
+async function openReplayMenu() {
+  replayMenu.hidden = false;
+  replayMenu.replaceChildren(el("p", { className: "hint" }, "lade …"));
+  let list = [];
+  try { list = await (await fetch("/api/sessions")).json(); } catch { /* Server weg */ }
+  const speed = el("select", { title: "Tempo", onchange: (e) => { replaySpeed = Number(e.target.value); } },
+    ...[2, 4, 10].map((v) => el("option", { value: String(v), selected: v === replaySpeed }, `${v}×`)));
+  const items = list.map((s) => el("button", { className: "item", type: "button", onclick: () => runReplay(s.id) },
+    el("div", {}, `${basename(s.cwd)} · ${s.id.slice(0, 4)}`),
+    el("div", { className: "sub" }, [
+      s.first ? fmtDate(s.first) : "ohne Zeitstempel",
+      `${s.agents} Subagent${s.agents === 1 ? "" : "s"}`,
+      s.first && s.last ? fmtDur(s.last - s.first) : `${s.events} Ereignisse`,
+    ].join(" · "))));
+  replayMenu.replaceChildren(el("h4", {}, "Session abspielen", speed),
+    ...(items.length ? items : [el("p", { className: "hint" }, "Noch keine gespeicherten Sessions.")]));
+}
+async function runReplay(id) {
+  replayMenu.hidden = true;
+  try {
+    const r = await fetch("/api/replay", { method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ session: id, speed: replaySpeed }) });
+    if (r.ok) { pendingSelect = (await r.json()).id; follow = true; }
+  } catch { /* Server weg */ }
+}
+replayBtn.addEventListener("click", () => { if (replayMenu.hidden) openReplayMenu(); else replayMenu.hidden = true; });
+document.addEventListener("click", (ev) => {
+  if (!replayMenu.hidden && !replayMenu.contains(ev.target) && ev.target !== replayBtn) replayMenu.hidden = true;
+});
+
+// ---------------------------------------------------------------- Rückfragen im Haus beantworten
+const permBtn = document.getElementById("permBtn");
+const permsEl = document.getElementById("perms");
+let answerInHouse = false;
+const permCards = new Map(); // id -> { el, info, left }
+
+function renderPermBtn() {
+  permBtn.textContent = `Erlauben im Haus: ${answerInHouse ? "an" : "aus"}`;
+  permBtn.setAttribute("aria-pressed", String(answerInHouse));
+}
+permBtn.addEventListener("click", async () => {
+  try {
+    const r = await fetch("/api/settings", { method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ answerInHouse: !answerInHouse }) });
+    if (r.ok) { answerInHouse = (await r.json()).answerInHouse; renderPermBtn(); }
+  } catch { /* Server weg */ }
+});
+
+function addPermCard(info) {
+  if (permCards.has(info.id)) return;
+  const left = el("span", { className: "left" });
+  const decide = async (decision) => {
+    allow.disabled = deny.disabled = true;
+    try {
+      await fetch("/api/permission", { method: "POST", headers: { "content-type": "application/json" },
+        body: JSON.stringify({ id: info.id, decision }) });
+    } catch { allow.disabled = deny.disabled = false; }
+  };
+  const allow = el("button", { className: "allow", type: "button", onclick: () => decide("allow") }, "Erlauben");
+  const deny = el("button", { className: "deny", type: "button", onclick: () => decide("deny") }, "Ablehnen");
+  const card = el("div", { className: "perm", role: "alertdialog" },
+    el("div", { className: "perm-title", title: "Zum Agent springen",
+      onclick: () => { if (houses.has(info.session)) { select(info.session, info.agent); openPanel(); } } },
+      el("b", {}, info.name), `möchte: ${info.what}`),
+    el("code", {}, info.detail),
+    el("div", { className: "perm-where" }, basename(info.cwd)),
+    el("div", { className: "perm-actions" }, allow, deny, left));
+  permsEl.append(card);
+  permCards.set(info.id, { el: card, info, left });
+  tickPermCards();
+  play("alert");
+}
+function removePermCard(id) {
+  const c = permCards.get(id);
+  if (c) { c.el.remove(); permCards.delete(id); }
+}
+function tickPermCards() {
+  for (const c of permCards.values()) {
+    const s = Math.max(0, Math.round((c.info.expiresAt - Date.now()) / 1000));
+    c.left.textContent = s > 0 ? `noch ${s} s, dann im Terminal` : "läuft ab …";
+  }
+}
+setInterval(tickPermCards, 1000);
+renderPermBtn();
 
 // ---------------------------------------------------------------- Verbindung
 const conn = document.getElementById("conn");
@@ -1215,6 +1310,15 @@ es.onerror = () => { conn.textContent = "Verbindung weg, versuche neu …"; conn
 es.onmessage = (ev) => {
   const m = JSON.parse(ev.data);
   if (m.kind === "reload") { location.reload(); return; }
-  if (m.kind === "hello") onHello(m);
+  if (m.kind === "hello") {
+    onHello(m);
+    answerInHouse = !!(m.settings && m.settings.answerInHouse);
+    renderPermBtn();
+    for (const id of [...permCards.keys()]) removePermCard(id);
+    for (const p of m.permissions || []) addPermCard(p);
+  }
+  else if (m.kind === "settings") { answerInHouse = !!m.settings.answerInHouse; renderPermBtn(); }
+  else if (m.kind === "permission") addPermCard(m);
+  else if (m.kind === "permission-done") removePermCard(m.id);
   else if (m.kind === "event") onEvent(m);
 };

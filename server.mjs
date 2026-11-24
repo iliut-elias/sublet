@@ -1,6 +1,7 @@
 // Agent-Haus: nimmt Hook-Ereignisse von Claude Code an und streamt sie per SSE an den Browser.
 // Start: node server.mjs   ->   http://127.0.0.1:4317
 import http from "node:http";
+import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -181,6 +182,11 @@ function ingest(e) {
       a.result = short(e.last_assistant_message, 400);
       text = `${a.name || "Agent"} fertig: ${short(e.last_assistant_message, 160)}`;
       break;
+    case "PermissionRequest":
+      a.status = "waiting";
+      a.activity = `fragt: ${describeTool(e.tool_name, e.tool_input)}`;
+      text = `möchte: ${describeTool(e.tool_name, e.tool_input)}`;
+      break;
     case "Notification":
       a.status = "waiting";
       a.activity = short(e.message, 80) || "wartet auf dich";
@@ -227,6 +233,8 @@ function broadcast(msg) {
   for (const res of clients) res.write(line);
 }
 
+function clampSpeed(v) { const n = Number(v); return Number.isFinite(n) ? Math.min(20, Math.max(1, n)) : 4; }
+
 function readBody(req, limit = 2_000_000) {
   return new Promise((resolve, reject) => {
     let size = 0;
@@ -241,22 +249,175 @@ function readBody(req, limit = 2_000_000) {
   });
 }
 
+// ---------------------------------------------------------------- Schutz
+// Nur Anfragen an unseren eigenen Host (gegen DNS-Rebinding) und keine fremden Webseiten (gegen CSRF).
+const OWN_HOSTS = new Set([`127.0.0.1:${PORT}`, `localhost:${PORT}`]);
+function hostOk(req) { return OWN_HOSTS.has(req.headers.host); }
+function originOk(req, required) {
+  const o = req.headers.origin;
+  if (!o) return !required; // curl aus den Hooks schickt keinen Origin
+  try { const u = new URL(o); return u.protocol === "http:" && OWN_HOSTS.has(u.host); } catch { return false; }
+}
+function json(res, code, data) {
+  res.writeHead(code, { "content-type": "application/json; charset=utf-8", "cache-control": "no-store" });
+  res.end(JSON.stringify(data));
+}
+
+/** Verarbeitet ein Hook-Ereignis: Zustand aktualisieren, an alle Browser schicken, optional ins Log schreiben. */
+function handleEvent(e, { log }) {
+  if (log) fs.appendFile(LOG_FILE, JSON.stringify({ ...e, _t: Date.now() }) + "\n", () => {});
+  const msg = ingest(e);
+  history.push(msg);
+  if (history.length > MAX_HISTORY) history.shift();
+  broadcast({ kind: "event", ...msg });
+  return msg;
+}
+
+// ---------------------------------------------------------------- Berechtigungen im Haus beantworten
+// Standardmäßig aus und nach jedem Neustart wieder aus. Ohne offenes Haus antwortet der Hook sofort leer,
+// dann fragt Claude Code ganz normal im Terminal.
+const PERMISSION_WAIT = 60_000;
+const settings = { answerInHouse: false };
+const pending = new Map(); // id -> { res, timer, info }
+
+function finishPermission(id, decision) {
+  const p = pending.get(id);
+  if (!p) return false;
+  pending.delete(id);
+  clearTimeout(p.timer);
+  if (!p.res.writableEnded) {
+    if (decision) {
+      const d = decision === "allow" ? { behavior: "allow" } : { behavior: "deny", message: "Im Agent-Haus abgelehnt." };
+      p.res.writeHead(200, { "content-type": "application/json" });
+      p.res.end(JSON.stringify({ hookSpecificOutput: { hookEventName: "PermissionRequest", decision: d } }));
+    } else {
+      p.res.writeHead(204).end();
+    }
+  }
+  console.log(`Rückfrage ${p.info.name} (${p.info.what}): ${decision || "keine Antwort, weiter im Terminal"}`);
+  broadcast({ kind: "permission-done", id, result: decision || "timeout" });
+  return true;
+}
+
+// ---------------------------------------------------------------- Replay
+function readLog() {
+  try {
+    return fs.readFileSync(LOG_FILE, "utf8").split("\n").filter(Boolean).map((l) => {
+      try { return JSON.parse(l); } catch { return null; }
+    }).filter(Boolean);
+  } catch { return []; }
+}
+function listSessions() {
+  const by = new Map();
+  for (const e of readLog()) {
+    // nur echte Claude-Sessions (UUID), keine Replays oder Test-Ereignisse
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(String(e.session_id))) continue;
+    let s = by.get(e.session_id);
+    if (!s) { s = { id: e.session_id, cwd: e.cwd || "", first: e._t || null, last: e._t || null, events: 0, agents: new Set() }; by.set(e.session_id, s); }
+    s.events++;
+    if (e.cwd) s.cwd = e.cwd;
+    if (e._t) { s.first = s.first ?? e._t; s.last = e._t; }
+    if (e.agent_id) s.agents.add(e.agent_id);
+  }
+  return [...by.values()]
+    .filter((s) => s.events >= 3)
+    .map((s) => ({ ...s, agents: s.agents.size }))
+    .reverse()
+    .slice(0, 30);
+}
+function startReplay(sessionId, speed) {
+  const events = readLog().filter((e) => e.session_id === sessionId);
+  if (!events.length) return null;
+  const id = `replay-${Date.now().toString(36)}`;
+  let delay = 0, prevT = null;
+  for (const e of events) {
+    const gap = e._t && prevT ? (e._t - prevT) / speed : 300;
+    delay += Math.min(2500, Math.max(60, gap));
+    if (e._t) prevT = e._t;
+    const copy = { ...e, session_id: id };
+    delete copy._t;
+    setTimeout(() => handleEvent(copy, { log: false }), delay);
+  }
+  return { id, events: events.length, seconds: Math.round(delay / 1000) };
+}
+
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, `http://${HOST}`);
+  if (!hostOk(req)) { res.writeHead(403).end(); return; }
 
   if (req.method === "POST" && url.pathname === "/event") {
+    if (!originOk(req, false)) { res.writeHead(403).end(); return; }
     try {
-      const raw = await readBody(req);
-      const e = JSON.parse(raw);
+      const e = JSON.parse(await readBody(req));
       if (!e.session_id || !e.hook_event_name) throw new Error("kein Hook-Ereignis");
-      fs.appendFile(LOG_FILE, JSON.stringify(e) + "\n", () => {});
-      const msg = ingest(e);
-      history.push(msg);
-      if (history.length > MAX_HISTORY) history.shift();
-      broadcast({ kind: "event", ...msg });
+      handleEvent(e, { log: true });
       res.writeHead(204).end();
     } catch (err) {
       res.writeHead(400, { "content-type": "text/plain" }).end(String(err.message));
+    }
+    return;
+  }
+
+  if (req.method === "POST" && url.pathname === "/permission") {
+    if (!originOk(req, false)) { res.writeHead(403).end(); return; }
+    let e;
+    try { e = JSON.parse(await readBody(req)); } catch { res.writeHead(400).end(); return; }
+    if (!e.session_id) { res.writeHead(400).end(); return; }
+    const msg = handleEvent({ ...e, hook_event_name: "PermissionRequest" }, { log: true });
+    if (!settings.answerInHouse || clients.size === 0) { res.writeHead(204).end(); return; }
+    const id = crypto.randomUUID();
+    const ti = e.tool_input || {};
+    const info = {
+      id, session: msg.session, cwd: msg.cwd, agent: msg.agent, name: msg.state.name || "Agent",
+      what: describeTool(e.tool_name, ti),
+      detail: String(ti.command || ti.file_path || ti.url || ti.pattern || JSON.stringify(ti)).slice(0, 400),
+      expiresAt: Date.now() + PERMISSION_WAIT,
+    };
+    pending.set(id, { res, info, timer: setTimeout(() => finishPermission(id, null), PERMISSION_WAIT) });
+    res.on("close", () => { if (pending.has(id)) finishPermission(id, null); }); // Claude hat aufgegeben
+    broadcast({ kind: "permission", ...info });
+    return;
+  }
+
+  if (req.method === "POST" && url.pathname === "/api/permission") {
+    if (!originOk(req, true)) { res.writeHead(403).end(); return; }
+    try {
+      const { id, decision } = JSON.parse(await readBody(req, 10_000));
+      if (decision !== "allow" && decision !== "deny") throw new Error();
+      json(res, finishPermission(String(id), decision) ? 200 : 404, { ok: true });
+    } catch {
+      json(res, 400, { error: "ungültige Anfrage" });
+    }
+    return;
+  }
+
+  if (url.pathname === "/api/settings") {
+    if (req.method === "POST") {
+      if (!originOk(req, true)) { res.writeHead(403).end(); return; }
+      try {
+        const body = JSON.parse(await readBody(req, 10_000));
+        settings.answerInHouse = body.answerInHouse === true;
+        broadcast({ kind: "settings", settings });
+      } catch { json(res, 400, { error: "ungültige Anfrage" }); return; }
+    }
+    json(res, 200, settings);
+    return;
+  }
+
+  if (req.method === "GET" && url.pathname === "/api/sessions") {
+    json(res, 200, listSessions());
+    return;
+  }
+
+  if (req.method === "POST" && url.pathname === "/api/replay") {
+    if (!originOk(req, true)) { res.writeHead(403).end(); return; }
+    try {
+      const { session, speed } = JSON.parse(await readBody(req, 10_000));
+      const r = startReplay(String(session), clampSpeed(speed));
+      if (!r) { json(res, 404, { error: "Session nicht gefunden" }); return; }
+      json(res, 200, r);
+    } catch {
+      json(res, 400, { error: "ungültige Anfrage" });
     }
     return;
   }
@@ -267,7 +428,8 @@ const server = http.createServer(async (req, res) => {
       "cache-control": "no-cache",
       connection: "keep-alive",
     });
-    res.write(`data: ${JSON.stringify({ kind: "hello", sessions: snapshot(), history })}\n\n`);
+    const permissions = [...pending.values()].map((p) => p.info);
+    res.write(`data: ${JSON.stringify({ kind: "hello", sessions: snapshot(), history, settings, permissions })}\n\n`);
     clients.add(res);
     const ping = setInterval(() => res.write(": ping\n\n"), 25000);
     req.on("close", () => { clearInterval(ping); clients.delete(res); });

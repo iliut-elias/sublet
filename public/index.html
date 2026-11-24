@@ -37,7 +37,35 @@
   .hbtn { background: rgba(13, 19, 38, 0.7); color: var(--muted); border: 1px solid var(--line); border-radius: 6px;
           padding: 3px 9px; font: 12px system-ui, sans-serif; cursor: pointer; }
   .hbtn:hover, .hbtn[aria-pressed="true"] { color: var(--text); border-color: var(--accent); }
-  #sound { margin-left: auto; }
+  #replayBtn { margin-left: auto; }
+  .menu { position: fixed; z-index: 4; top: 48px; right: 16px; width: 360px; max-width: calc(100vw - 32px);
+          max-height: 70vh; overflow: auto; background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
+          padding: 10px; box-shadow: 0 12px 40px rgba(0, 0, 0, 0.45); }
+  .menu h4 { display: flex; justify-content: space-between; align-items: center; margin: 2px 4px 8px;
+             font: 11px Silkscreen, monospace; color: var(--muted); letter-spacing: .5px; }
+  .menu select { background: #141b33; color: var(--text); border: 1px solid var(--line); border-radius: 6px; padding: 2px 6px; }
+  .menu .item { display: block; width: 100%; text-align: left; background: transparent; border: 0; color: var(--text);
+                padding: 6px 8px; border-radius: 6px; cursor: pointer; font: 13px system-ui, sans-serif; }
+  .menu .item:hover, .menu .item:focus-visible { background: rgba(110, 168, 255, 0.12); outline: none; }
+  .menu .sub { color: var(--muted); font-size: 12px; }
+  #permBtn[aria-pressed="true"] { color: #141826; background: var(--waiting); border-color: var(--waiting); }
+
+  /* Rückfragen-Karten */
+  #perms { position: fixed; z-index: 5; left: 0; right: 0; bottom: 16px; margin: 0 auto; width: min(480px, calc(100vw - 32px));
+           display: flex; flex-direction: column; gap: 8px; pointer-events: none; }
+  .perm { pointer-events: auto; background: var(--panel); border: 2px solid var(--waiting); border-radius: 10px; padding: 12px 14px;
+          box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5); }
+  .perm-title { font-size: 14px; margin-bottom: 6px; cursor: pointer; }
+  .perm-title b { font: 13px Silkscreen, monospace; color: var(--waiting); margin-right: 4px; }
+  .perm code { display: block; font: 12px/1.45 ui-monospace, monospace; background: #0a0f1f; color: #dfe6f5; padding: 6px 8px;
+               border-radius: 6px; white-space: pre-wrap; word-break: break-all; max-height: 120px; overflow: auto; }
+  .perm-where { color: var(--muted); font-size: 12px; margin-top: 6px; }
+  .perm-actions { display: flex; gap: 8px; align-items: center; margin-top: 10px; }
+  .perm-actions button { border: 0; border-radius: 6px; padding: 6px 14px; font: 600 13px system-ui, sans-serif; cursor: pointer; }
+  .perm-actions .allow { background: var(--working); color: #0b1a12; }
+  .perm-actions .deny { background: #e85d5d; color: #1a0b0b; }
+  .perm-actions button:disabled { opacity: .5; cursor: default; }
+  .perm-actions .left { margin-left: auto; color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
   .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); flex: none; display: inline-block; }
   .dot.working { background: var(--working); box-shadow: 0 0 6px var(--working); }
   .dot.waiting { background: var(--waiting); }
@@ -97,10 +125,15 @@
   <h1>Agent-Haus</h1>
   <nav id="tabs"></nav>
   <span id="conn" aria-live="polite">verbinde …</span>
+  <button id="replayBtn" class="hbtn" type="button" aria-haspopup="true">Replay</button>
+  <button id="permBtn" class="hbtn" type="button" aria-pressed="false"
+          title="Rückfragen von Claude (Berechtigungen) hier im Haus beantworten. Achtung: Jedes Programm auf diesem Rechner, das HTTP-Anfragen an 127.0.0.1 schicken kann, könnte dann auch antworten. Nach einem Server-Neustart wieder aus.">Erlauben im Haus: aus</button>
   <button id="sound" class="hbtn" type="button" title="Töne an/aus">Ton: aus</button>
   <a href="/text.html">Textansicht</a>
 </header>
 <aside id="panel" aria-label="Details zum Agent"></aside>
+<div id="replayMenu" class="menu" hidden></div>
+<div id="perms" aria-live="assertive"></div>
 <script src="/haus.js"></script>
 </body>
 </html>
