@@ -297,6 +297,13 @@ const server = http.createServer(async (req, res) => {
   res.writeHead(404).end();
 });
 
+// Ändert sich etwas in public/, laden alle offenen Seiten neu (kein veralteter Code im Browser).
+let reloadTimer = null;
+fs.watch(path.join(ROOT, "public"), () => {
+  clearTimeout(reloadTimer);
+  reloadTimer = setTimeout(() => broadcast({ kind: "reload" }), 300);
+});
+
 server.listen(PORT, HOST, () => {
   console.log(`Agent-Haus läuft auf http://${HOST}:${PORT}`);
 });

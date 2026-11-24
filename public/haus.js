@@ -377,7 +377,7 @@ function drawStatic(h, L) {
       const idx = (lvl - 1) * COLS + col;
       const r = roomRect(L, idx);
       const key = h.order[idx];
-      if (key) drawRoom(r, roomHue(idx)); else drawEmptyRoom(r);
+      if (key) drawRoom(r, roomHue(idx), h.agents.get(key).state.type); else drawEmptyRoom(r);
     }
   }
   drawLobby(L);
@@ -488,10 +488,36 @@ function drawWallpaper(r, base, stripe, wains, line) {
   R(r.x, fl - 12, r.w, 12, wains);
   R(r.x, fl - 13, r.w, 1, line);
 }
-function drawRoom(r, hue) {
+/** Wandbild je nach Agent-Typ: Explore = Landkarte, Plan = Whiteboard, sonst ein Bild. */
+function drawWallThing(x, y, type) {
+  if (type === "Explore") {
+    R(x, y, 22, 15, "#8a6a4a");
+    R(x + 1, y + 1, 20, 13, "#e8d9b0");
+    R(x + 3, y + 3, 6, 4, "#9cc59a"); R(x + 12, y + 7, 7, 5, "#9cc59a"); R(x + 2, y + 9, 4, 3, "#8ab7d8");
+    for (let i = 0; i < 12; i += 2) P(x + 5 + i, y + 8 - (i >> 2), "#c0392b");   // gestrichelte Route
+    P(x + 17, y + 4, "#c0392b"); P(x + 16, y + 3, "#c0392b"); P(x + 18, y + 3, "#c0392b");
+    P(x + 16, y + 5, "#c0392b"); P(x + 18, y + 5, "#c0392b");                      // Ziel-X
+  } else if (type === "Plan") {
+    R(x, y, 24, 16, "#8a93ab");
+    R(x + 1, y + 1, 22, 14, "#eef1f6");
+    for (let i = 0; i < 3; i++) {
+      R(x + 3, y + 3 + i * 4, 2, 2, i < 2 ? "#5fd38a" : "#c7cde0");                // Häkchen-Kästchen
+      R(x + 7, y + 3 + i * 4, 10 - i * 2, 1, "#6ea8ff");
+    }
+    R(x + 1, y + 16, 22, 1, "#6e7690");
+  } else {
+    R(x, y, 20, 14, "#c9a26a");
+    R(x + 1, y + 1, 18, 12, "#9fd3ff");
+    R(x + 1, y + 8, 18, 5, "#5fb36a");
+    R(x + 4, y + 5, 6, 3, "#4f9a5a"); R(x + 10, y + 6, 7, 2, "#4f9a5a");
+    R(x + 14, y + 3, 2, 2, "#ffe27a");
+  }
+}
+function drawRoom(r, hue, type) {
   drawWallpaper(r, hsl(hue, 24, 23), hsl(hue, 24, 25.5), hsl(hue, 22, 17), hsl(hue, 22, 30));
   const fl = r.y + r.h;
   drawWindow(r.x + 10, r.y + 12);
+  drawWallThing(r.x + 68, r.y + 13, type);
   drawShelf(r.x + 96, r.y + 12);
   drawPlant(r.x + 100, fl);
   drawDesk(r.x + 48, fl, 1);
@@ -578,6 +604,17 @@ function drawScreen(x, y, w, h, status, seed) {
     R(x, y, w, h, "#05070d");
   }
 }
+/** Zweiter Bildschirm mit Terminal (für Agents, die viel im Terminal arbeiten). */
+function drawTerminal(x, fl, status) {
+  R(x, fl - 23, 14, 10, "#1b1f2e");
+  R(x + 6, fl - 13, 2, 1, "#2a3044");
+  R(x + 3, fl - 12, 8, 1, "#2a3044");
+  R(x + 1, fl - 22, 12, 8, "#020403");
+  if (status === "done" || status === "gone") return;
+  const lines = Math.floor(T * 2) % 4;
+  for (let i = 0; i < lines; i++) { P(x + 2, fl - 21 + i * 2, "#5fd38a"); R(x + 4, fl - 21 + i * 2, 3 + ((i * 5) % 6), 1, "#3a8f5a"); }
+  if (Math.floor(T * 3) % 2) R(x + 2, fl - 21 + lines * 2, 2, 1, "#5fd38a");
+}
 function lit(status) { return status === "working" || status === "waiting" || status === "idle"; }
 function drawBulb(x, top, on) {
   R(x - 1, top + 9, 3, 1, on ? "#ffe9a8" : "#3a3a48");
@@ -619,6 +656,7 @@ function drawDynamic(h, L, hits) {
       rooms.push({ r, st });
       if (key) {
         drawScreen(r.x + 63, r.y + r.h - 22, 14, 8, st, idx + 3);
+        if ((h.agents.get(key).bash || 0) >= 3) drawTerminal(r.x + 79, r.y + r.h, st);
         drawBulb(r.x + 60, r.y, lit(st));
         hits.push({ ...r, key });
       }
@@ -772,6 +810,7 @@ function ensureAgent(h, state) {
   return { a, isNew };
 }
 function addLog(a, m) {
+  if (m.event === "PreToolUse" && /^Terminal/.test(m.text || "")) a.bash = (a.bash || 0) + 1;
   a.log.push({ t: m.t, text: m.text });
   if (a.log.length > 200) a.log.shift();
 }
@@ -809,9 +848,10 @@ function visit(h, fromA, toA, text) {
   const x = toA.room < 0 ? BOSS_SEAT_X - 24 : home.x - 18;
   c.goto({ x, level: home.level });
   c.queue.push({ type: "face", dir: 1 });
-  c.queue.push({ type: "say", text: text || "Kurze Frage …", t: 2.4 });
-  c.queue.push({ type: "call", fn: () => toA.char.sayFor(toA.room < 0 ? "Danke, schau ich mir an!" : "Okay, mach ich!", 1.8) });
-  c.queue.push({ type: "wait", t: 2.2 });
+  c.queue.push({ type: "say", text: text || "Kurze Frage …", t: 3.2 });
+  c.queue.push({ type: "wait", t: 1.2 });
+  c.queue.push({ type: "call", fn: () => toA.char.sayFor(toA.room < 0 ? "Danke, schau ich mir an!" : "Okay, mach ich!", 2.4) });
+  c.queue.push({ type: "wait", t: 2.6 });
   c.goto("home");
   c.queue.push({ type: "sit" });
 }
@@ -1042,6 +1082,7 @@ es.onopen = () => { conn.textContent = "live"; conn.className = "on"; };
 es.onerror = () => { conn.textContent = "Verbindung weg, versuche neu …"; conn.className = ""; };
 es.onmessage = (ev) => {
   const m = JSON.parse(ev.data);
+  if (m.kind === "reload") { location.reload(); return; }
   if (m.kind === "hello") onHello(m);
   else if (m.kind === "event") onEvent(m);
 };
