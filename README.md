@@ -30,10 +30,11 @@ Der Server liest den Namen heraus. Fehlt er, gibt es einen Ersatznamen nach Typ 
 | Ereignis | Animation |
 |---|---|
 | Session startet | Chef kommt durch die Tür und klettert in die Chefetage |
-| Subagent startet | Figur erscheint mit Puff beim Chef, holt den Auftrag ab, klettert in ihren Raum |
+| Subagent startet | Figur kommt unten durch die Tür (nacheinander, wenn mehrere), klettert in ihren Raum |
 | Tool-Aufruf | Figur sitzt am Tisch und tippt, Monitor zeigt Code, Sprechblase sagt was |
 | Rückfrage / Berechtigung | gelbe Sprechblase mit „!“ |
 | Subagent fertig | Figur bringt den Bericht zum Chef, geht zurück und schläft (Zzz, Licht aus) |
 | Chef wartet auf dich | Chef schlendert durch die Chefetage |
 
-Die Figuren sind eigene Pixel-Wesen (kein Anthropic-Branding). Farbe und Accessoire hängen an der Agent-ID.
+Die Figuren sind eigene Pixel-Wesen (kein Anthropic-Branding). Farbe und Accessoire hängen an der Raumnummer, damit Nachbarn verschieden aussehen.
+Die Szene füllt den ganzen Bildschirm, Texte sind HTML über dem Canvas (scharf statt Canvas-Text). Das Panel öffnet per Klick auf einen Raum (Esc schließt).

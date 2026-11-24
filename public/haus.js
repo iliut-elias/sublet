@@ -14,7 +14,7 @@ const LADDER_X = IX + SW / 2;
 const BOSS_SEAT_X = RX0 + 170;
 const DOOR_X = RX0 + 180;
 const CHIMNEY_X = HX + HW - 80;
-const WALK = 80, CLIMB = 100;           // Pixel pro Sekunde
+const WALK = 90, CLIMB = 110;           // Pixel pro Sekunde
 
 const OUTLINE = "#141826";
 const CODE_COLORS = ["#6ee7a8", "#6ea8ff", "#ffd166", "#c792ea"];
@@ -30,6 +30,12 @@ const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 const basename = (p) => (p || "").split("/").filter(Boolean).pop() || "?";
 const trunc = (s, n) => (s && s.length > n ? s.slice(0, n - 1) + "…" : s || "");
 
+/** Goldener Winkel: aufeinanderfolgende Räume bekommen deutlich verschiedene Farben (nie das Chef-Orange). */
+function roomHue(idx) {
+  let h = (200 + idx * 137.5) % 360;
+  if (Math.abs(h - 28) < 24) h = (h + 50) % 360;
+  return Math.round(h);
+}
 function hash(s) {
   let h = 2166136261;
   for (const ch of String(s)) { h ^= ch.codePointAt(0); h = Math.imul(h, 16777619); }
@@ -141,10 +147,9 @@ class Char {
   constructor(house, agent) {
     this.house = house;
     this.agent = agent;
-    const seed = hash(agent.state.key);
     this.boss = agent.state.key === "main";
-    this.hue = this.boss ? 28 : seed % 360;
-    this.acc = this.boss ? "crown" : ACCS[(seed >>> 9) % ACCS.length];
+    this.hue = this.boss ? 28 : roomHue(agent.room);
+    this.acc = this.boss ? "crown" : ACCS[(agent.room + 1) % ACCS.length];
     this.x = 0; this.y = 0; this.level = 0;
     this.queue = [];
     this.pose = "stand";
@@ -153,6 +158,7 @@ class Char {
     this.say = null; this.sayT = 0;
     this.wanderT = 1 + Math.random() * 3;
     this.headX = 0; this.headY = 0;
+    this.hidden = false;
   }
 
   get L() { return this.house.layout(); }
@@ -216,6 +222,7 @@ class Char {
         case "face": this.facing = a.dir; this.queue.shift(); return;
         case "poof": this.house.poof(this.x, this.y - 6); this.queue.shift(); return;
         case "call": a.fn(); this.queue.shift(); return;
+        case "enter": this.hidden = false; this.house.doorT = 1.1; this.queue.shift(); return;
       }
     }
     this.idle(dt);
@@ -243,6 +250,7 @@ class Char {
   }
 
   draw() {
+    if (this.hidden) return;
     const st = this.status;
     let fx = Math.round(this.x) - 6, fy = Math.round(this.y) - 12;
     const o = { hue: this.hue, acc: this.acc, eyes: "open", shift: 0, feet: "stand" };
@@ -280,6 +288,8 @@ class House {
     this.order = [];           // Subagent-Keys in Einzugsreihenfolge
     this.parts = [];
     this.smokeT = 0;
+    this.doorT = 0;          // > 0: Tür steht offen
+    this.nextDoorAt = 0;     // damit mehrere Agents nacheinander eintreten
     this.lastAt = 0;
     this._L = null;
     this.bg = null; this.bgKey = "";
@@ -297,6 +307,7 @@ class House {
     }
   }
   update(dt) {
+    this.doorT = Math.max(0, this.doorT - dt);
     for (const a of this.agents.values()) a.char.update(dt);
     const boss = this.boss;
     if (boss && boss.state.status === "working") {
@@ -312,34 +323,41 @@ class House {
   }
 }
 
-// ---------------------------------------------------------------- Statischer Hintergrund
-function drawStatic(h, L) {
-  const W = LW, gy = L.groundY;
-  // Himmel
+// ---------------------------------------------------------------- Himmel + Boden (ganzer Bildschirm)
+/** Zeichnet Himmel, Mond, Hügel und Boden über die ganze Welt. groundY in Weltkoordinaten. */
+function drawSky(WW, WH, groundY, moonX, moonY) {
   const sky = ["#060914", "#080c1a", "#0a1020", "#0c1326", "#0f172d", "#121b34", "#151f3a"];
-  for (let i = 0; i < sky.length; i++) R(0, Math.floor((i * gy) / sky.length), W, Math.ceil(gy / sky.length) + 1, sky[i]);
+  const band = Math.ceil(groundY / sky.length);
+  for (let i = 0; i < sky.length; i++) R(0, i * band, WW, band + 1, sky[i]);
   const rnd = rng32(7);
-  for (let i = 0; i < 70; i++) P(rnd() * W, rnd() * (gy - 20), rnd() < 0.2 ? "#ffffff" : "#8f9cc8");
+  const n = Math.round((WW * groundY) / 1100);
+  for (let i = 0; i < n; i++) P(rnd() * WW, rnd() * (groundY - 24), rnd() < 0.2 ? "#ffffff" : "#8f9cc8");
   // Mond
-  const mx = W - 40, my = 26;
   for (let dy = -8; dy <= 8; dy++) for (let dx = -8; dx <= 8; dx++) {
-    if (dx * dx + dy * dy <= 64) P(mx + dx, my + dy, dx * dx + dy * dy > 49 ? "#d8cfae" : "#f3ecd2");
+    if (dx * dx + dy * dy <= 64) P(moonX + dx, moonY + dy, dx * dx + dy * dy > 49 ? "#d8cfae" : "#f3ecd2");
   }
-  P(mx - 3, my - 2, "#d8cfae"); P(mx + 2, my + 3, "#d8cfae"); P(mx + 3, my + 2, "#d8cfae");
-  // Hügel
-  for (let x = 0; x < W; x++) {
-    const hh = Math.round(12 + 6 * Math.sin(x / 37) + 4 * Math.sin(x / 13 + 1));
-    R(x, gy - hh, 1, hh, "#0c1430");
+  P(moonX - 3, moonY - 2, "#d8cfae"); P(moonX + 2, moonY + 3, "#d8cfae"); P(moonX + 3, moonY + 2, "#d8cfae");
+  // Hügel (zwei Reihen)
+  for (let x = 0; x < WW; x++) {
+    const far = Math.round(22 + 9 * Math.sin(x / 53) + 5 * Math.sin(x / 19 + 2));
+    R(x, groundY - far, 1, far, "#0a1128");
+    const near = Math.round(11 + 6 * Math.sin(x / 37) + 4 * Math.sin(x / 13 + 1));
+    R(x, groundY - near, 1, near, "#0d1631");
   }
   // Boden
-  R(0, gy, W, L.H - gy, "#241d30");
-  R(0, gy, W, 2, "#4f9a5a");
-  for (let i = 0; i < 40; i++) {
-    const x = rnd() * W;
-    P(x, gy - 1, "#4f9a5a");
-    if (rnd() < 0.4) P(x + 1, gy - 2, "#5fb36a");
-    P(rnd() * W, gy + 4 + rnd() * (L.H - gy - 6), "#2f2640");
+  R(0, groundY, WW, WH - groundY, "#241d30");
+  R(0, groundY, WW, 2, "#4f9a5a");
+  for (let i = 0; i < WW / 8; i++) {
+    const x = rnd() * WW;
+    P(x, groundY - 1, "#4f9a5a");
+    if (rnd() < 0.4) P(x + 1, groundY - 2, "#5fb36a");
   }
+  for (let i = 0; i < (WW * (WH - groundY)) / 90; i++) P(rnd() * WW, groundY + 4 + rnd() * (WH - groundY - 4), "#2f2640");
+}
+
+// ---------------------------------------------------------------- Statisches Haus (transparent drumherum)
+function drawStatic(h, L) {
+  const gy = L.groundY;
 
   // Schornstein (hinter dem Dach)
   R(CHIMNEY_X, ROOF_TOP + 2, 12, 26, "#6b3a3a");
@@ -359,7 +377,7 @@ function drawStatic(h, L) {
       const idx = (lvl - 1) * COLS + col;
       const r = roomRect(L, idx);
       const key = h.order[idx];
-      if (key) drawRoom(r, hash(key) % 360); else drawEmptyRoom(r);
+      if (key) drawRoom(r, roomHue(idx)); else drawEmptyRoom(r);
     }
   }
   drawLobby(L);
@@ -580,13 +598,6 @@ function roomOverlay(r, status) {
 }
 
 function drawDynamic(h, L, hits) {
-  // funkelnde Sterne
-  const rnd = rng32(99);
-  for (let i = 0; i < 12; i++) {
-    const x = rnd() * LW, y = rnd() * (ATTIC_TOP - 6), ph = rnd() * 6;
-    if (Math.sin(T * 2 + ph) > 0.6) P(x, y, "#ffffff");
-  }
-
   const boss = h.boss;
   const bossStatus = boss ? boss.state.status : "gone";
   // Chefetage
@@ -613,6 +624,14 @@ function drawDynamic(h, L, hits) {
       }
     }
   }
+  if (h.doorT > 0) {
+    const fl = L.lobby.floorY;
+    R(DOOR_X - 11, fl - 31, 22, 31, "#0b1226");
+    P(DOOR_X - 6, fl - 26, "#cfd8ff"); P(DOOR_X + 3, fl - 20, "#8f9cc8");
+    R(DOOR_X - 11, fl - 3, 22, 3, "#2f5a3a");
+    R(DOOR_X + 9, fl - 31, 3, 31, "#7a4a32");
+    R(DOOR_X + 9, fl - 31, 1, 31, "#5a3626");
+  }
   const lobbyOn = !h.ended;
   drawBulb(RX0 + 120, L.lobby.top, lobbyOn);
   drawBulb(RX0 + 240, L.lobby.top, lobbyOn);
@@ -633,7 +652,7 @@ function drawDynamic(h, L, hits) {
   if (h.ended) { G.fillStyle = "rgba(4,6,16,0.4)"; G.fillRect(RX0, L.lobby.top, COLS * RW, LOBBY_H); }
 
   // Auswahl
-  const sel = selected && h.id === currentId ? hits.find((x) => x.key === selected) : null;
+  const sel = panelOpen && h.id === currentId ? hits.find((x) => x.key === selected) : null;
   if (sel) {
     const c = "#6ea8ff";
     R(sel.x, sel.y, sel.w, 1, c); R(sel.x, sel.y + sel.h - 1, sel.w, 1, c);
@@ -641,82 +660,87 @@ function drawDynamic(h, L, hits) {
   }
 }
 
-// ---------------------------------------------------------------- Texte (volle Auflösung)
-function drawPlaque(tc, K, x, y, text, gold) {
-  const fs = Math.max(8, Math.round(K * 2.7));
-  tc.font = `${fs}px Silkscreen, monospace`;
-  const pad = Math.round(K * 1.2);
-  const w = Math.ceil(tc.measureText(text).width) + pad * 2, hh = fs + pad;
-  const X = Math.round(x * K), Y = Math.round(y * K);
-  tc.fillStyle = "rgba(10,14,28,0.88)";
-  tc.fillRect(X, Y, w, hh);
-  tc.fillStyle = gold ? "#ffd166" : "#dfe6f5";
-  tc.textBaseline = "middle";
-  tc.fillText(text, X + pad, Y + hh / 2 + 1);
-}
-function drawBubble(tc, K, cx, cy, text, kind, maxW) {
-  const fs = Math.max(12, Math.round(K * 5.2));
-  tc.font = `${fs}px VT323, monospace`;
-  const pad = Math.round(K * 1.6), b = Math.max(1, Math.round(K / 2));
-  const w = Math.ceil(tc.measureText(text).width) + pad * 2;
-  const h = Math.round(fs * 0.95) + Math.round(K * 1.2);
-  const tail = Math.round(K * 2);
-  const ax = Math.round(cx * K);
-  let x = Math.round(ax - w / 2);
-  x = clamp(x, 2, maxW - w - 2);
-  const y = Math.round(cy * K) - h - tail;
-  const fill = kind === "waiting" ? "#ffd166" : kind === "say" ? "#cfe0ff" : "#eef2ff";
-  tc.fillStyle = OUTLINE;
-  tc.fillRect(x + b, y, w - 2 * b, h); tc.fillRect(x, y + b, w, h - 2 * b);
-  tc.fillRect(ax - tail, y + h - b, tail * 2, b); tc.fillRect(ax - tail / 2, y + h, tail, tail);
-  tc.fillStyle = fill;
-  tc.fillRect(x + 2 * b, y + b, w - 4 * b, h - 2 * b); tc.fillRect(x + b, y + 2 * b, w - 2 * b, h - 4 * b);
-  tc.fillRect(ax - tail + b, y + h - 2 * b, tail * 2 - 2 * b, 2 * b);
-  tc.fillRect(ax - tail / 2 + b, y + h - b, tail - 2 * b, tail);
-  tc.fillStyle = OUTLINE;
-  tc.textBaseline = "middle";
-  tc.fillText(text, x + pad, y + h / 2 + 1);
-}
+// ---------------------------------------------------------------- Texte (HTML über dem Canvas)
+// Text als echte HTML-Elemente auf ganzen Pixeln: der Browser rendert ihn scharf.
+const overlay = document.getElementById("overlay");
+const labels = new Map(); // key -> { el, cls, text, w, h, left, top, op, tx, seen }
+let frameNo = 0;
 
-function drawTexts(tc, K, h, L, canvasW) {
+function label(key, cls, text) {
+  let l = labels.get(key);
+  if (!l) {
+    const el = document.createElement("div");
+    overlay.append(el);
+    l = { el, cls: null, text: null, w: 0, h: 0, left: null, top: null, op: null, tx: null };
+    labels.set(key, l);
+  }
+  if (l.cls !== cls) { l.el.className = "lbl " + cls; l.cls = cls; l.text = null; }
+  if (l.text !== text) { l.el.textContent = text; l.text = text; l.w = l.el.offsetWidth; l.h = l.el.offsetHeight; }
+  l.seen = frameNo;
+  return l;
+}
+function place(l, left, top, op = 1) {
+  if (l.left !== left) { l.el.style.left = `${left}px`; l.left = left; }
+  if (l.top !== top) { l.el.style.top = `${top}px`; l.top = top; }
+  if (l.op !== op) { l.el.style.opacity = op; l.op = op; }
+}
+// Sobald die Pixel-Schriften geladen sind, alle Größen neu messen.
+document.fonts && document.fonts.ready.then(() => { for (const l of labels.values()) l.text = null; });
+
+function updateOverlay(h, L, S, ox, oy, W) {
+  frameNo++;
+  const sz = S >= 3 ? "l" : S >= 2 ? "m" : "s";
+  const X = (g) => Math.round((g + ox) * S), Y = (g) => Math.round((g + oy) * S);
+
   // Schilder
   const br = roomRect(L, -1);
-  drawPlaque(tc, K, br.x + 3, br.y + 3, h.boss ? `Chef · ${basename(h.cwd)}` : "Chefetage", true);
+  place(label("p:boss", `plaque gold sz-${sz}`, h.boss ? `Chef · ${basename(h.cwd)}` : "Chefetage"), X(br.x + 3), Y(br.y + 3));
   for (let lvl = 1; lvl <= L.floors; lvl++) {
     for (let col = 0; col < COLS; col++) {
       const idx = (lvl - 1) * COLS + col;
       const r = roomRect(L, idx);
       const key = h.order[idx];
-      drawPlaque(tc, K, r.x + 3, r.y + 3, key ? h.agents.get(key).state.name || "Agent" : "frei", false);
+      const name = key ? h.agents.get(key).state.name || "Agent" : "frei";
+      place(label(`p:${idx}`, `plaque sz-${sz}`, name), X(r.x + 3), Y(r.y + 3));
     }
   }
-  drawPlaque(tc, K, DOOR_X - 23, L.lobby.top + 6, "AGENT-HAUS", true);
+  const sign = label("p:lobby", `plaque gold sz-${sz}`, "AGENT-HAUS");
+  place(sign, Math.round(X(DOOR_X) - sign.w / 2), Y(L.lobby.top + 6));
 
-  // Schlafende: Zzz
-  const zfs = Math.max(10, Math.round(K * 3.5));
-  tc.font = `${zfs}px Silkscreen, monospace`;
-  tc.textBaseline = "alphabetic";
+  const placed = []; // schon gesetzte Sprechblasen, damit sich keine überdecken
   for (const a of h.agents.values()) {
-    const c = a.char;
-    if (!c.sleeping) continue;
-    for (let i = 0; i < 3; i++) {
-      const ph = (T * 0.5 + i / 3) % 1;
-      tc.globalAlpha = 1 - ph;
-      tc.fillStyle = "#9fb0d8";
-      tc.fillText("z", (c.headX + 5 + ph * 7) * K, (c.headY - ph * 12) * K);
+    const c = a.char, st = a.state.status, key = a.state.key;
+    if (c.hidden) continue;
+    // Schlafende: Zzz
+    if (c.sleeping) {
+      for (let i = 0; i < 3; i++) {
+        const ph = (T * 0.5 + i / 3) % 1;
+        const z = label(`z:${key}:${i}`, `zzz sz-${sz}`, "z");
+        place(z, X(c.headX + 5 + ph * 7), Y(c.headY - 6 - ph * 12), Math.round((1 - ph) * 10) / 10);
+      }
     }
-  }
-  tc.globalAlpha = 1;
-
-  // Sprechblasen
-  for (const a of h.agents.values()) {
-    const c = a.char, st = a.state.status;
-    let text = null, kind = "normal";
+    // Sprechblase
+    let text = null, kind = "";
     if (c.say) { text = c.say; kind = "say"; }
     else if (st === "working" && c.pose === "sit") text = a.state.activity;
     else if (st === "waiting") { text = "! " + (a.state.activity || "wartet auf dich"); kind = "waiting"; }
-    if (text) drawBubble(tc, K, c.headX, c.headY - 2, trunc(text, 30), kind, canvasW);
+    if (!text) continue;
+    const b = label(`b:${key}`, `bubble ${kind} sz-${sz}`, trunc(text, 34));
+    const ax = X(c.headX);
+    const left = clamp(Math.round(ax - b.w / 2), 2, W - b.w - 2);
+    let top = Y(c.headY - 2) - b.h - 8;
+    for (let n = 0; n < 6; n++) {
+      const hit = placed.find((q) => left < q.l + q.w + 4 && left + b.w + 4 > q.l && top < q.t + q.h + 2 && top + b.h + 2 > q.t);
+      if (!hit) break;
+      top = hit.t - b.h - 6; // über die andere Blase stapeln
+    }
+    placed.push({ l: left, t: top, w: b.w, h: b.h });
+    place(b, left, top);
+    const tx = clamp(ax - left - 3, 4, b.w - 10);
+    if (b.tx !== tx) { b.el.style.setProperty("--tx", `${tx}px`); b.tx = tx; }
   }
+
+  for (const [k, l] of labels) if (l.seen !== frameNo) { l.el.remove(); labels.delete(k); }
 }
 
 // ---------------------------------------------------------------- Zustand + Ereignisse
@@ -724,6 +748,9 @@ const houses = new Map();
 let currentId = null;
 let selected = "main";
 let follow = true;
+let panelOpen = false;
+function openPanel() { panelOpen = true; panelEl.classList.add("open"); renderPanel(); }
+function closePanel() { panelOpen = false; panelEl.classList.remove("open"); }
 
 function getHouse(id, cwd) {
   let h = houses.get(id);
@@ -749,22 +776,18 @@ function addLog(a, m) {
   if (a.log.length > 200) a.log.shift();
 }
 
-function spawnFromBoss(h, a) {
-  const c = a.char;
-  c.setPos(BOSS_SEAT_X - 26, 0);
-  c.pose = "stand";
-  c.queue.push({ type: "poof" });
-  c.queue.push({ type: "say", text: `Auftrag: ${a.state.task || "?"}`, t: 1.8 });
-  c.queue.push({ type: "wait", t: 1.4 });
-  c.goto("home");
-  c.queue.push({ type: "sit" });
-}
-function enterThroughDoor(a) {
+/** Figur kommt unten durch die Tür und geht in ihren Raum. Mehrere treten nacheinander ein. */
+function enterThroughDoor(h, a, text) {
   const c = a.char;
   c.setPos(DOOR_X, -1);
   c.pose = "stand";
-  c.queue.push({ type: "say", text: "Neue Session!", t: 1.5 });
-  c.queue.push({ type: "wait", t: 0.8 });
+  c.facing = -1;
+  c.hidden = true;
+  h.nextDoorAt = Math.max(T, h.nextDoorAt) + 1.3;
+  c.queue.push({ type: "wait", t: h.nextDoorAt - 1.3 - T });
+  c.queue.push({ type: "enter" });
+  c.queue.push({ type: "say", text, t: 1.5 });
+  c.queue.push({ type: "wait", t: 0.7 });
   c.goto("home");
   c.queue.push({ type: "sit" });
 }
@@ -786,8 +809,8 @@ function onEvent(m) {
   addLog(a, m);
   h.lastAt = m.t;
   if (isNew) {
-    if (m.event === "SubagentStart") spawnFromBoss(h, a);
-    else if (m.state.key === "main" && m.event === "SessionStart") enterThroughDoor(a);
+    if (m.event === "SubagentStart") enterThroughDoor(h, a, `Auftrag: ${a.state.task || "?"}`);
+    else if (m.state.key === "main" && m.event === "SessionStart") enterThroughDoor(h, a, "Neue Session!");
     else a.char.placeAtHome();
   }
   if (m.event === "SubagentStop") reportToBoss(h, a);
@@ -835,6 +858,10 @@ function select(id, key) {
 
 function renderTabs() {
   const list = [...houses.values()].sort((x, y) => y.lastAt - x.lastAt).slice(0, 6);
+  if (!list.length) {
+    tabsEl.replaceChildren(el("span", { className: "hint" }, "Noch keine Session: starte claude im Ordner ~/agent-haus"));
+    return;
+  }
   tabsEl.replaceChildren(...list.map((h, i) => {
     const b = document.createElement("button");
     if (h.id === currentId) b.className = "on";
@@ -877,6 +904,7 @@ function renderPanel() {
   const log = el("ul", { id: "p-log" }, ...a.log.slice(-80).map((l) =>
     el("li", {}, el("time", {}, fmtTime(l.t)), l.text)));
   panelEl.replaceChildren(...[
+    el("button", { className: "close", title: "Schließen (Esc)", onclick: closePanel }, "×"),
     el("div", { className: "p-head" }, av,
       el("div", {},
         el("h2", { id: "p-name" }, st.name || "Agent"),
@@ -892,35 +920,54 @@ function renderPanel() {
 
 // ---------------------------------------------------------------- Rendern
 const view = document.getElementById("view");
-const stage = document.getElementById("stage");
 const vctx = view.getContext("2d");
 const low = makeCanvas(LW, 100);
 const lctx = low.getContext("2d");
 const placeholder = new House("none", "");
+const TOP = 52; // Platz für die Kopfzeile (CSS-Pixel)
 let hits = [];
-let scale = 1;
+let cam = { S: 1, ox: 0, oy: 0 };
+let camS = 0, camX = 0; // geglättete Kamera (Zoom + Mitte in CSS-Pixeln)
+let skyCache = null, skyKey = "";
 
-function render() {
+function render(dt = 0) {
   const h = houses.get(currentId) || placeholder;
   const L = h.layout();
+  const vw = window.innerWidth, vh = window.innerHeight;
 
-  // Größe bestimmen: ganzzahlig skalieren, wenn möglich
-  const availW = stage.clientWidth - 16, availH = stage.clientHeight - 16;
-  // Breite begrenzt immer, die Höhe nur bis Faktor 2 (darunter wird gescrollt).
-  // Ab Faktor 1 in halben Schritten, damit die Pixel gleichmäßig bleiben.
-  let S = Math.min(availW / LW, Math.max(availH / L.H, 2));
-  if (S >= 1) S = Math.min(4, Math.floor(S * 2) / 2);
-  scale = S;
+  // Haus so groß wie möglich einpassen: oben die Kopfzeile, rechts ggf. das offene Panel frei lassen
+  const side = panelOpen && vw > 900 ? 372 : 0;
+  const tS = Math.max(0.5, Math.min((vw - side - 24) / LW, (vh - TOP - 12) / L.H));
+  const tX = (vw - side) / 2;
+  const k = camS === 0 ? 1 : 1 - Math.exp(-dt * 9);
+  camS += (tS - camS) * k; camX += (tX - camX) * k;
+  if (Math.abs(tS - camS) < 0.002) camS = tS;
+  if (Math.abs(tX - camX) < 0.5) camX = tX;
+  const S = camS;
+  const WW = Math.ceil(vw / S), WH = Math.ceil(vh / S);
+  const ox = Math.floor(camX / S - LW / 2);
+  const oy = Math.floor(TOP / S + ((vh - TOP) / S - L.H) / 2);
+  cam = { S, ox, oy };
+
   const dpr = window.devicePixelRatio || 1;
-  const K = S * dpr;
-  const cw = Math.round(LW * K), ch = Math.round(L.H * K);
+  const cw = Math.round(vw * dpr), ch = Math.round(vh * dpr);
   if (view.width !== cw || view.height !== ch) {
     view.width = cw; view.height = ch;
-    view.style.width = `${Math.round(LW * S)}px`;
-    view.style.height = `${Math.round(L.H * S)}px`;
+    view.style.width = `${vw}px`; view.style.height = `${vh}px`;
   }
-  if (low.height !== L.H) low.height = L.H;
+  if (low.width !== WW || low.height !== WH) { low.width = WW; low.height = WH; }
 
+  // Himmel (gecacht, solange sich Größe und Lage nicht ändern)
+  const groundY = oy + L.groundY;
+  const moonX = Math.min(WW - 24 - Math.ceil(side / S), ox + LW + 46), moonY = Math.max(oy + 18, Math.round(TOP / S) + 14);
+  const sk = `${WW}x${WH}:${groundY}:${moonX}:${moonY}`;
+  if (skyKey !== sk) {
+    skyCache = makeCanvas(WW, WH);
+    G = skyCache.getContext("2d");
+    drawSky(WW, WH, groundY, moonX, moonY);
+    skyKey = sk;
+  }
+  // Haus (gecacht pro Stockwerkszahl)
   const key = `${L.floors}:${h.order.length}`;
   if (!h.bg || h.bgKey !== key) {
     h.bg = makeCanvas(LW, L.H);
@@ -928,15 +975,25 @@ function render() {
     drawStatic(h, L);
     h.bgKey = key;
   }
+
   G = lctx;
-  G.clearRect(0, 0, LW, L.H);
+  G.drawImage(skyCache, 0, 0);
+  // funkelnde Sterne
+  const rnd = rng32(99);
+  for (let i = 0; i < WW / 25; i++) {
+    const x = rnd() * WW, y = rnd() * (groundY * 0.55), ph = rnd() * 6;
+    if (Math.sin(T * 2 + ph) > 0.6) P(x, y, "#ffffff");
+  }
+  G.save();
+  G.translate(ox, oy);
   G.drawImage(h.bg, 0, 0);
   hits = [];
   drawDynamic(h, L, hits);
+  G.restore();
 
   vctx.imageSmoothingEnabled = false;
-  vctx.drawImage(low, 0, 0, LW, L.H, 0, 0, cw, ch);
-  drawTexts(vctx, K, h, L, cw);
+  vctx.drawImage(low, 0, 0, WW, WH, 0, 0, Math.round(WW * S * dpr), Math.round(WH * S * dpr));
+  updateOverlay(h, L, S, ox, oy, vw);
 }
 
 let last = performance.now();
@@ -945,22 +1002,21 @@ function frame(now) {
   last = now;
   T += dt;
   for (const h of houses.values()) h.update(dt);
-  render();
+  render(dt);
   requestAnimationFrame(frame);
 }
 requestAnimationFrame(frame);
 
 function hitAt(ev) {
-  const r = view.getBoundingClientRect();
-  const x = ((ev.clientX - r.left) / r.width) * LW;
-  const y = ((ev.clientY - r.top) / r.height) * (view.height / (view.width / LW));
+  const x = ev.clientX / cam.S - cam.ox, y = ev.clientY / cam.S - cam.oy;
   return hits.find((hh) => x >= hh.x && x < hh.x + hh.w && y >= hh.y && y < hh.y + hh.h);
 }
 view.addEventListener("click", (ev) => {
   const hit = hitAt(ev);
-  if (hit) { selected = hit.key; renderPanel(); }
+  if (hit) { selected = hit.key; openPanel(); }
 });
 view.addEventListener("mousemove", (ev) => { view.style.cursor = hitAt(ev) ? "pointer" : "default"; });
+window.addEventListener("keydown", (ev) => { if (ev.key === "Escape") closePanel(); });
 
 // ---------------------------------------------------------------- Verbindung
 const conn = document.getElementById("conn");
