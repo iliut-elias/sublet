@@ -9,13 +9,13 @@ Macht laufende Claude-Code-Sessions sichtbar: Haupt-Agent und Subagents mit dem,
 - `public/text.html`: die einfache Textansicht von vorher.
 - `server.mjs`: lokaler Server ohne Abhängigkeiten (Node 24), Port 4317. `POST /event` nimmt Hook-Ereignisse an, `GET /stream` streamt sie per Server-Sent Events, alles andere kommt aus `public/`.
 - `hooks/send-event.sh`: Hook-Skript, leitet die Payload per curl weiter. Läuft der Server nicht, passiert nichts.
-- `.claude/settings.json`: Hooks nur für dieses Projekt.
+- Die Hooks stehen global in `~/.claude/settings.json` und rufen `hooks/send-event.sh` auf. Damit erscheint jede Claude-Code-Session im Haus, egal in welchem Ordner. Läuft der Server nicht, tun sie nichts.
 - Rohdaten landen in `data/events.jsonl` (nicht im Git).
 
 ## Starten
 ```bash
 node server.mjs          # dann http://127.0.0.1:4317 öffnen
-claude                   # in einem zweiten Terminal, in diesem Ordner
+claude                   # in einem zweiten Terminal, in einem beliebigen Ordner
 ```
 
 ## Wie ein Agent erkannt wird
