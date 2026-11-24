@@ -1,0 +1,126 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Agent-Haus</title>
+<style>
+  :root {
+    --bg: #0b1020; --panel: #121a30; --line: #22304f; --text: #dfe6f5; --muted: #8492b3;
+    --accent: #6ea8ff; --working: #6ee7a8; --waiting: #ffd166; --done: #8492b3; --gone: #4a5675;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 14px/1.45 system-ui, sans-serif; }
+  header { display: flex; align-items: baseline; gap: 12px; padding: 16px 20px; border-bottom: 1px solid var(--line); }
+  h1 { font-size: 18px; margin: 0; }
+  #conn { color: var(--muted); font-size: 12px; }
+  #conn.on { color: var(--working); }
+  main { padding: 16px 20px; display: grid; gap: 24px; }
+  .session h2 { font-size: 13px; font-weight: 600; color: var(--muted); margin: 0 0 10px; }
+  .agents { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 12px; }
+  .agent { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 12px; display: flex; flex-direction: column; min-height: 220px; }
+  .agent.main { border-color: var(--accent); }
+  .head { display: flex; align-items: center; gap: 8px; }
+  .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--muted); flex: none; }
+  .working .dot { background: var(--working); box-shadow: 0 0 8px var(--working); }
+  .waiting .dot { background: var(--waiting); }
+  .done .dot { background: var(--done); }
+  .gone { opacity: .55; }
+  .name { font-weight: 600; }
+  .type { color: var(--muted); font-size: 12px; margin-left: auto; }
+  .task { color: var(--muted); font-size: 12px; margin: 4px 0 8px; }
+  .activity { font-size: 13px; margin-bottom: 8px; min-height: 1.4em; }
+  .log { list-style: none; margin: 0; padding: 8px 0 0; border-top: 1px solid var(--line); font: 12px/1.5 ui-monospace, monospace; color: var(--muted); overflow-y: auto; max-height: 220px; }
+  .log li { padding: 1px 0; word-break: break-word; }
+  .log time { color: var(--gone); margin-right: 6px; }
+  .empty { color: var(--muted); }
+</style>
+</head>
+<body>
+<header>
+  <h1>Agent-Haus</h1>
+  <span id="conn">verbinde …</span>
+</header>
+<main id="root"><p class="empty">Noch keine Ereignisse. Starte eine Claude-Code-Session in ~/agent-haus.</p></main>
+<script>
+  const root = document.getElementById("root");
+  const conn = document.getElementById("conn");
+  /** sessionId -> { cwd, agents: Map<key, {state, log: []}> } */
+  const sessions = new Map();
+
+  const fmt = (t) => new Date(t).toLocaleTimeString("de-AT", { hour12: false });
+
+  function upsert(sessionId, cwd, state) {
+    let s = sessions.get(sessionId);
+    if (!s) { s = { cwd, agents: new Map() }; sessions.set(sessionId, s); }
+    if (cwd) s.cwd = cwd;
+    let a = s.agents.get(state.key);
+    if (!a) { a = { state, log: [] }; s.agents.set(state.key, a); }
+    a.state = state;
+    return a;
+  }
+
+  function addEvent(m) {
+    const a = upsert(m.session, m.cwd, m.state);
+    a.log.push({ t: m.t, text: m.text });
+    if (a.log.length > 100) a.log.shift();
+  }
+
+  function el(tag, cls, text) {
+    const e = document.createElement(tag);
+    if (cls) e.className = cls;
+    if (text != null) e.textContent = text;
+    return e;
+  }
+
+  function render() {
+    if (!sessions.size) return;
+    root.replaceChildren();
+    for (const [id, s] of [...sessions].reverse()) {
+      const sec = el("section", "session");
+      sec.append(el("h2", null, `${s.cwd || "?"} · ${id.slice(0, 8)}`));
+      const grid = el("div", "agents");
+      const agents = [...s.agents.values()].sort((x, y) =>
+        (x.state.key === "main" ? -1 : 0) - (y.state.key === "main" ? -1 : 0));
+      for (const a of agents) {
+        const st = a.state;
+        const card = el("article", `agent ${st.status} ${st.key === "main" ? "main" : ""}`);
+        const head = el("div", "head");
+        head.append(el("span", "dot"),
+          el("span", "name", st.key === "main" ? "Haupt-Agent" : `Agent ${st.key.slice(0, 6)}`),
+          el("span", "type", st.type));
+        card.append(head);
+        if (st.key !== "main") card.append(el("div", "task", st.task || ""));
+        card.append(el("div", "activity", st.activity || ""));
+        const log = el("ul", "log");
+        for (const l of a.log.slice(-40)) {
+          const li = el("li");
+          li.append(el("time", null, fmt(l.t)), document.createTextNode(l.text));
+          log.append(li);
+        }
+        card.append(log);
+        grid.append(card);
+        queueMicrotask(() => (log.scrollTop = log.scrollHeight));
+      }
+      sec.append(grid);
+      root.append(sec);
+    }
+  }
+
+  const es = new EventSource("/stream");
+  es.onopen = () => { conn.textContent = "live"; conn.className = "on"; };
+  es.onerror = () => { conn.textContent = "Verbindung weg, versuche neu …"; conn.className = ""; };
+  es.onmessage = (ev) => {
+    const m = JSON.parse(ev.data);
+    if (m.kind === "hello") {
+      sessions.clear();
+      for (const h of m.history) addEvent(h);
+      for (const s of m.sessions) for (const st of s.agents) upsert(s.id, s.cwd, st);
+    } else if (m.kind === "event") {
+      addEvent(m);
+    }
+    render();
+  };
+</script>
+</body>
+</html>
