@@ -323,36 +323,103 @@ class House {
   }
 }
 
+// ---------------------------------------------------------------- Tageszeit
+const PHASES = {
+  nacht: {
+    sky: ["#060914", "#080c1a", "#0a1020", "#0c1326", "#0f172d", "#121b34", "#151f3a"],
+    stars: 1, body: "moon", hillFar: "#0a1128", hillNear: "#0d1631",
+    ground: "#241d30", speck: "#2f2640", grass: "#4f9a5a", grass2: "#5fb36a", glass: "#16224a", clouds: null,
+  },
+  morgen: {
+    sky: ["#1d2b5a", "#3b3f78", "#6a4a86", "#a45c7e", "#e07a6a", "#f4a261", "#f7c98b"],
+    stars: 0.2, body: "sunLow", sun: "#ffb15c", hillFar: "#3a3060", hillNear: "#2f2a4e",
+    ground: "#2e2433", speck: "#3a2e40", grass: "#5a9a5a", grass2: "#6cb36a", glass: "#e89a7a", clouds: "#ffd2c4",
+  },
+  tag: {
+    sky: ["#3f8fd8", "#4d9be0", "#5ea8e6", "#70b4ea", "#84c0ee", "#98ccf2", "#acd6f4"],
+    stars: 0, body: "sun", sun: "#ffe27a", hillFar: "#7fbf7a", hillNear: "#5fa85f",
+    ground: "#5a4636", speck: "#6e5642", grass: "#6cc068", grass2: "#86d47e", glass: "#9fd3ff", clouds: "#ffffff",
+  },
+  abend: {
+    sky: ["#1a1f4a", "#2e2a63", "#55357a", "#8a3f7a", "#c4506a", "#e8735a", "#f4a05a"],
+    stars: 0.3, body: "sunLow", sun: "#ff8a4c", hillFar: "#2a2450", hillNear: "#221d40",
+    ground: "#251c2e", speck: "#33283f", grass: "#4f8a50", grass2: "#5fa060", glass: "#e88a6a", clouds: "#f6b8a8",
+  },
+};
+/** Phase nach echter Uhrzeit; zum Testen per ?zeit=nacht|morgen|tag|abend erzwingbar. */
+function currentPhase() {
+  const forced = new URLSearchParams(location.search).get("zeit");
+  if (forced && PHASES[forced]) return forced;
+  const d = new Date(), hr = d.getHours() + d.getMinutes() / 60;
+  if (hr >= 21 || hr < 5) return "nacht";
+  if (hr < 8) return "morgen";
+  if (hr < 17) return "tag";
+  return "abend";
+}
+let phaseName = currentPhase();
+setInterval(() => { phaseName = currentPhase(); }, 30000);
+const PH = () => PHASES[phaseName];
+
 // ---------------------------------------------------------------- Himmel + Boden (ganzer Bildschirm)
 /** Zeichnet Himmel, Mond, Hügel und Boden über die ganze Welt. groundY in Weltkoordinaten. */
-function drawSky(WW, WH, groundY, moonX, moonY) {
-  const sky = ["#060914", "#080c1a", "#0a1020", "#0c1326", "#0f172d", "#121b34", "#151f3a"];
-  const band = Math.ceil(groundY / sky.length);
-  for (let i = 0; i < sky.length; i++) R(0, i * band, WW, band + 1, sky[i]);
+function drawSky(WW, WH, groundY, bodyX, bodyY) {
+  const ph = PH();
+  const band = Math.ceil(groundY / ph.sky.length);
+  for (let i = 0; i < ph.sky.length; i++) R(0, i * band, WW, band + 1, ph.sky[i]);
   const rnd = rng32(7);
-  const n = Math.round((WW * groundY) / 1100);
-  for (let i = 0; i < n; i++) P(rnd() * WW, rnd() * (groundY - 24), rnd() < 0.2 ? "#ffffff" : "#8f9cc8");
-  // Mond
-  for (let dy = -8; dy <= 8; dy++) for (let dx = -8; dx <= 8; dx++) {
-    if (dx * dx + dy * dy <= 64) P(moonX + dx, moonY + dy, dx * dx + dy * dy > 49 ? "#d8cfae" : "#f3ecd2");
+  const n = Math.round(((WW * groundY) / 1100) * ph.stars);
+  for (let i = 0; i < n; i++) P(rnd() * WW, rnd() * (groundY - 24) * (ph.stars < 1 ? 0.35 : 1), rnd() < 0.2 ? "#ffffff" : "#8f9cc8");
+  if (ph.body === "moon") {
+    for (let dy = -8; dy <= 8; dy++) for (let dx = -8; dx <= 8; dx++) {
+      if (dx * dx + dy * dy <= 64) P(bodyX + dx, bodyY + dy, dx * dx + dy * dy > 49 ? "#d8cfae" : "#f3ecd2");
+    }
+    P(bodyX - 3, bodyY - 2, "#d8cfae"); P(bodyX + 2, bodyY + 3, "#d8cfae"); P(bodyX + 3, bodyY + 2, "#d8cfae");
+  } else {
+    // Sonne mit Schein
+    G.globalAlpha = 0.18;
+    for (let dy = -15; dy <= 15; dy++) for (let dx = -15; dx <= 15; dx++) {
+      if (dx * dx + dy * dy <= 225) P(bodyX + dx, bodyY + dy, ph.sun);
+    }
+    G.globalAlpha = 1;
+    for (let dy = -9; dy <= 9; dy++) for (let dx = -9; dx <= 9; dx++) {
+      if (dx * dx + dy * dy <= 81) P(bodyX + dx, bodyY + dy, dx * dx + dy * dy > 64 ? ph.sun : "#fff6c8");
+    }
   }
-  P(moonX - 3, moonY - 2, "#d8cfae"); P(moonX + 2, moonY + 3, "#d8cfae"); P(moonX + 3, moonY + 2, "#d8cfae");
   // Hügel (zwei Reihen)
   for (let x = 0; x < WW; x++) {
     const far = Math.round(22 + 9 * Math.sin(x / 53) + 5 * Math.sin(x / 19 + 2));
-    R(x, groundY - far, 1, far, "#0a1128");
+    R(x, groundY - far, 1, far, ph.hillFar);
     const near = Math.round(11 + 6 * Math.sin(x / 37) + 4 * Math.sin(x / 13 + 1));
-    R(x, groundY - near, 1, near, "#0d1631");
+    R(x, groundY - near, 1, near, ph.hillNear);
   }
   // Boden
-  R(0, groundY, WW, WH - groundY, "#241d30");
-  R(0, groundY, WW, 2, "#4f9a5a");
+  R(0, groundY, WW, WH - groundY, ph.ground);
+  R(0, groundY, WW, 2, ph.grass);
   for (let i = 0; i < WW / 8; i++) {
     const x = rnd() * WW;
-    P(x, groundY - 1, "#4f9a5a");
-    if (rnd() < 0.4) P(x + 1, groundY - 2, "#5fb36a");
+    P(x, groundY - 1, ph.grass);
+    if (rnd() < 0.4) P(x + 1, groundY - 2, ph.grass2);
   }
-  for (let i = 0; i < (WW * (WH - groundY)) / 90; i++) P(rnd() * WW, groundY + 4 + rnd() * (WH - groundY - 4), "#2f2640");
+  for (let i = 0; i < (WW * (WH - groundY)) / 90; i++) P(rnd() * WW, groundY + 4 + rnd() * (WH - groundY - 4), ph.speck);
+}
+
+/** Ziehende Wolken (nur tagsüber, morgens und abends). */
+function drawClouds(WW, groundY) {
+  const c = PH().clouds;
+  if (!c) return;
+  const rnd = rng32(31);
+  const n = Math.max(3, Math.round(WW / 110));
+  for (let i = 0; i < n; i++) {
+    const speed = 2 + rnd() * 3, span = WW + 80;
+    const x = (((rnd() * span + T * speed) % span) + span) % span - 40;
+    const y = 14 + rnd() * groundY * 0.3;
+    const w = 16 + Math.floor(rnd() * 14);
+    G.globalAlpha = 0.85;
+    R(x, y, w, 4, c);
+    R(x + 3, y - 3, Math.floor(w * 0.45), 3, c);
+    R(x + Math.floor(w * 0.4), y - 5, Math.floor(w * 0.35), 5, c);
+    G.globalAlpha = 1;
+  }
 }
 
 // ---------------------------------------------------------------- Statisches Haus (transparent drumherum)
@@ -431,8 +498,9 @@ function drawStatic(h, L) {
 
 function drawWindow(x, y) {
   R(x, y, 22, 18, "#6e5642");
-  R(x + 2, y + 2, 18, 14, "#16224a");
-  P(x + 5, y + 5, "#cfd8ff"); P(x + 15, y + 11, "#8f9cc8");
+  R(x + 2, y + 2, 18, 14, PH().glass);
+  if (phaseName === "nacht") { P(x + 5, y + 5, "#cfd8ff"); P(x + 15, y + 11, "#8f9cc8"); }
+  else if (phaseName === "tag") { R(x + 4, y + 4, 5, 2, "#ffffff"); }
   R(x + 10, y + 2, 2, 14, "#6e5642");
   R(x + 2, y + 8, 18, 2, "#6e5642");
   R(x - 1, y + 18, 24, 2, "#8a6a4a");
@@ -664,7 +732,7 @@ function drawDynamic(h, L, hits) {
   }
   if (h.doorT > 0) {
     const fl = L.lobby.floorY;
-    R(DOOR_X - 11, fl - 31, 22, 31, "#0b1226");
+    R(DOOR_X - 11, fl - 31, 22, 31, PH().sky[4]);
     P(DOOR_X - 6, fl - 26, "#cfd8ff"); P(DOOR_X + 3, fl - 20, "#8f9cc8");
     R(DOOR_X - 11, fl - 3, 22, 3, "#2f5a3a");
     R(DOOR_X + 9, fl - 31, 3, 31, "#7a4a32");
@@ -1016,8 +1084,12 @@ function render(dt = 0) {
 
   // Himmel (gecacht, solange sich Größe und Lage nicht ändern)
   const groundY = oy + L.groundY;
-  const moonX = Math.min(WW - 24 - Math.ceil(side / S), ox + LW + 46), moonY = Math.max(oy + 18, Math.round(TOP / S) + 14);
-  const sk = `${WW}x${WH}:${groundY}:${moonX}:${moonY}`;
+  let moonX = Math.min(WW - 24 - Math.ceil(side / S), ox + LW + 46), moonY = Math.max(oy + 18, Math.round(TOP / S) + 14);
+  if (PH().body === "sunLow") {
+    moonY = groundY - 38;
+    if (phaseName === "morgen") moonX = Math.max(24, ox - 46);
+  }
+  const sk = `${WW}x${WH}:${groundY}:${moonX}:${moonY}:${phaseName}`;
   if (skyKey !== sk) {
     skyCache = makeCanvas(WW, WH);
     G = skyCache.getContext("2d");
@@ -1025,7 +1097,7 @@ function render(dt = 0) {
     skyKey = sk;
   }
   // Haus (gecacht pro Stockwerkszahl)
-  const key = `${L.floors}:${h.order.length}`;
+  const key = `${L.floors}:${h.order.length}:${phaseName}`;
   if (!h.bg || h.bgKey !== key) {
     h.bg = makeCanvas(LW, L.H);
     G = h.bg.getContext("2d");
@@ -1035,9 +1107,10 @@ function render(dt = 0) {
 
   G = lctx;
   G.drawImage(skyCache, 0, 0);
-  // funkelnde Sterne
+  drawClouds(WW, groundY);
+  // funkelnde Sterne (nur nachts)
   const rnd = rng32(99);
-  for (let i = 0; i < WW / 25; i++) {
+  for (let i = 0; i < (phaseName === "nacht" ? WW / 25 : 0); i++) {
     const x = rnd() * WW, y = rnd() * (groundY * 0.55), ph = rnd() * 6;
     if (Math.sin(T * 2 + ph) > 0.6) P(x, y, "#ffffff");
   }
