@@ -44,6 +44,7 @@ From then on, every Claude Code session shows up in the house, whatever folder y
 | Claude waits for you | The boss strolls around the top floor |
 
 More details:
+- **Every house looks different:** roof, facade, chimney, furniture, wallpaper and garden come from the project folder, so a project always gets its own house. Characters differ in body shape (8), eyes, pattern and accessory (15, from caps to a wizard hat); a house never gives two neighbors the same one.
 - **As many subagents as you like:** every three subagents get a new floor, and the view zooms out to fit the house. Rooms are reused when agents move out.
 - **Names:** Claude gives every subagent a nickname (the plugin asks for it when a session starts). Without one, the house uses a fallback like “Scout 1”.
 - **Furniture by type:** Explore agents get a map, Plan agents a whiteboard, everyone else a picture. Agents that use the terminal a lot get a second screen.
