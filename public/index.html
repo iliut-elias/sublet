@@ -87,7 +87,7 @@
         const card = el("article", `agent ${st.status} ${st.key === "main" ? "main" : ""}`);
         const head = el("div", "head");
         head.append(el("span", "dot"),
-          el("span", "name", st.key === "main" ? "Haupt-Agent" : `Agent ${st.key.slice(0, 6)}`),
+          el("span", "name", st.name || (st.key === "main" ? "Haupt-Agent" : `Agent ${st.key.slice(0, 6)}`)),
           el("span", "type", st.type));
         card.append(head);
         if (st.key !== "main") card.append(el("div", "task", st.task || ""));

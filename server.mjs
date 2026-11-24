@@ -24,6 +24,20 @@ function short(text, n = 120) {
   return s.length > n ? s.slice(0, n - 1) + "…" : s;
 }
 
+/** Der Haupt-Agent schreibt "[Name] Aufgabe" in die description (siehe CLAUDE.md). */
+function parseTask(desc) {
+  const s = short(desc, 80);
+  const m = s.match(/^\[([^\]]{1,24})\]\s*(.*)$/);
+  return m ? { name: m[1].trim(), task: m[2] || m[1].trim() } : { name: "", task: s };
+}
+
+/** Ersatzname, falls der Haupt-Agent keinen vergeben hat: Typ + laufende Nummer. */
+const TYPE_LABELS = { "general-purpose": "Helfer", Explore: "Späher", Plan: "Planer" };
+function fallbackName(s, type) {
+  s.typeCounts[type] = (s.typeCounts[type] || 0) + 1;
+  return `${TYPE_LABELS[type] || type} ${s.typeCounts[type]}`;
+}
+
 /** Macht aus Tool + Eingabe einen kurzen, lesbaren Satz. */
 function describeTool(name, input = {}) {
   const file = (p) => (p ? path.basename(p) : "");
@@ -38,7 +52,10 @@ function describeTool(name, input = {}) {
     case "WebFetch": return `liest Webseite ${short(input.url, 60)}`;
     case "WebSearch": return `sucht im Web: ${short(input.query, 60)}`;
     case "Agent":
-    case "Task": return `beauftragt Agent: ${short(input.description, 60)}`;
+    case "Task": {
+      const { name: who, task } = parseTask(input.description);
+      return `beauftragt ${who || "Agent"}: ${task}`;
+    }
     case "TodoWrite": return "plant Aufgaben";
     default: return name;
   }
@@ -47,7 +64,7 @@ function describeTool(name, input = {}) {
 function getSession(e) {
   let s = sessions.get(e.session_id);
   if (!s) {
-    s = { id: e.session_id, cwd: e.cwd, startedAt: Date.now(), agents: new Map(), pendingTasks: [] };
+    s = { id: e.session_id, cwd: e.cwd, startedAt: Date.now(), agents: new Map(), pendingTasks: [], typeCounts: {} };
     sessions.set(e.session_id, s);
   }
   if (e.cwd) s.cwd = e.cwd;
@@ -61,6 +78,7 @@ function getAgent(s, e) {
     a = {
       key,
       type: e.agent_id ? e.agent_type || "subagent" : "main",
+      name: e.agent_id ? "" : "Haupt-Agent",
       task: e.agent_id ? "" : "Haupt-Agent",
       status: "idle",
       activity: "",
@@ -97,7 +115,7 @@ function ingest(e) {
       a.tools++;
       text = a.activity;
       if ((e.tool_name === "Agent" || e.tool_name === "Task") && !e.agent_id) {
-        s.pendingTasks.push(short(e.tool_input?.description || e.tool_input?.prompt, 80));
+        s.pendingTasks.push(parseTask(e.tool_input?.description || e.tool_input?.prompt));
       }
       break;
     }
@@ -109,18 +127,21 @@ function ingest(e) {
       text = `fehlgeschlagen: ${describeTool(e.tool_name, e.tool_input)}${e.error ? " – " + short(e.error, 80) : ""}`;
       a.activity = "denkt nach";
       break;
-    case "SubagentStart":
+    case "SubagentStart": {
       // Kein tool_use_id im Ereignis: Aufgabe über die Reihenfolge der Agent-Aufrufe zuordnen.
-      a.task = s.pendingTasks.shift() || a.type;
+      const p = s.pendingTasks.shift();
+      a.task = p?.task || a.type;
+      a.name = p?.name || fallbackName(s, a.type);
       a.status = "working";
       a.activity = "zieht ein";
-      text = `Neuer Agent (${a.type}): ${a.task}`;
+      text = `${a.name} zieht ein (${a.type}): ${a.task}`;
       break;
+    }
     case "SubagentStop":
       a.status = "done";
       a.activity = "fertig";
       a.result = short(e.last_assistant_message, 400);
-      text = `Agent fertig: ${short(e.last_assistant_message, 160)}`;
+      text = `${a.name || "Agent"} fertig: ${short(e.last_assistant_message, 160)}`;
       break;
     case "Notification":
       a.status = "waiting";

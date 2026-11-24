@@ -17,3 +17,7 @@ claude                   # in einem zweiten Terminal, in diesem Ordner
 ## Wie ein Agent erkannt wird
 Jedes Hook-Ereignis aus einem Subagent hat `agent_id` und `agent_type`, ohne `agent_id` ist es der Haupt-Agent.
 `SubagentStart` hat keine `tool_use_id`, deshalb wird die Aufgabe über die Reihenfolge der Agent-Aufrufe zugeordnet.
+
+## Namen der Subagents
+`CLAUDE.md` bittet den Haupt-Agent, jedem Subagent einen Namen zu geben: `[Name] Aufgabe` in der `description`.
+Der Server liest den Namen heraus. Fehlt er, gibt es einen Ersatznamen nach Typ (z. B. „Späher 1“ für Explore).
