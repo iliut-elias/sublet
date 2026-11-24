@@ -1,4 +1,4 @@
-# Agent-Haus – notes for working on this repo
+# Sublet – notes for working on this repo
 
 Shows Claude Code sessions live as a pixel house (see README.md). It is also a Claude Code plugin:
 `.claude-plugin/` holds the plugin and marketplace manifests, `hooks/hooks.json` the hooks.
@@ -15,7 +15,7 @@ Shows Claude Code sessions live as a pixel house (see README.md). It is also a C
 ## Testing
 - `node server.mjs`, then `node tools/demo.mjs` plays a made-up session (not stored, not in Replay).
 - `?time=night|morning|day|evening` and `?lang=en|de` in the URL.
-- Use a separate port and data folder for experiments: `AGENT_HAUS_PORT=4399 AGENT_HAUS_DATA=/tmp/ah node server.mjs`.
+- Use a separate port and data folder for experiments: `SUBLET_PORT=4399 SUBLET_DATA=/tmp/ah node server.mjs`.
 - Plugin: `claude --plugin-dir .`. If the plugin is installed too, every event arrives twice.
 
 ## Hook facts (Claude Code 2.1.331)

@@ -1,4 +1,4 @@
-// Agent-Haus server: receives Claude Code hook events and streams them to the browser via Server-Sent Events.
+// Sublet server: receives Claude Code hook events and streams them to the browser via Server-Sent Events.
 // Start: node server.mjs   ->   http://127.0.0.1:4317
 //
 // Texts sent to the browser are language-neutral messages: [key, params]. The browser translates them
@@ -10,13 +10,13 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-const PORT = Number(process.env.AGENT_HAUS_PORT || 4317);
+const PORT = Number(process.env.SUBLET_PORT || 4317);
 const HOST = "127.0.0.1";
 const ROOT = path.dirname(fileURLToPath(import.meta.url));
-const DATA_DIR = process.env.AGENT_HAUS_DATA || path.join(os.homedir(), ".agent-haus");
+const DATA_DIR = process.env.SUBLET_DATA || path.join(os.homedir(), ".sublet");
 const LOG_FILE = path.join(DATA_DIR, "events.jsonl");
-const LOG_ON = process.env.AGENT_HAUS_LOG !== "0";
-const KEEP_DAYS = Math.max(1, Number(process.env.AGENT_HAUS_KEEP_DAYS) || 7);
+const LOG_ON = process.env.SUBLET_LOG !== "0";
+const KEEP_DAYS = Math.max(1, Number(process.env.SUBLET_KEEP_DAYS) || 7);
 const MAX_HISTORY = 500;
 const MIN = 60_000, HOUR = 60 * MIN, DAY = 24 * HOUR;
 const RESTORE_WINDOW = 6 * HOUR;     // after a restart, sessions active in this window come back
@@ -393,7 +393,7 @@ function finishPermission(id, decision) {
   clearTimeout(p.timer);
   if (!p.res.writableEnded) {
     if (decision) {
-      const d = decision === "allow" ? { behavior: "allow" } : { behavior: "deny", message: "Denied in the Agent-Haus." };
+      const d = decision === "allow" ? { behavior: "allow" } : { behavior: "deny", message: "Denied in Sublet." };
       p.res.writeHead(200, { "content-type": "application/json" });
       p.res.end(JSON.stringify({ hookSpecificOutput: { hookEventName: "PermissionRequest", decision: d } }));
     } else {
@@ -574,13 +574,13 @@ setInterval(() => { try { compactLog(); } catch { /* try again next time */ } },
 
 server.on("error", (err) => {
   if (err.code === "EADDRINUSE") {
-    console.error(`Port ${PORT} is already in use. Is the Agent-Haus already running? Otherwise set AGENT_HAUS_PORT.`);
+    console.error(`Port ${PORT} is already in use. Is Sublet already running? Otherwise set SUBLET_PORT.`);
   } else {
     console.error(err.message);
   }
   process.exit(1);
 });
 server.listen(PORT, HOST, () => {
-  console.log(`Agent-Haus is running at http://${HOST}:${PORT}`);
-  console.log(LOG_ON ? `Log: ${LOG_FILE} (kept for ${KEEP_DAYS} days)` : "Log: off (AGENT_HAUS_LOG=0)");
+  console.log(`Sublet is running at http://${HOST}:${PORT}`);
+  console.log(LOG_ON ? `Log: ${LOG_FILE} (kept for ${KEEP_DAYS} days)` : "Log: off (SUBLET_LOG=0)");
 });

@@ -1,4 +1,4 @@
-// Agent-Haus – pixel view.
+// Sublet – pixel view.
 // Every Claude Code session is a house: the boss floor (main agent) at the top,
 // one room per subagent below, the lobby at the bottom. Houses of several sessions stand side by side in a street.
 // Everything is drawn at a small resolution (game pixels) and scaled up sharply; texts go on top at full resolution.
@@ -823,8 +823,14 @@ function place(l, left, top, op = 1) {
   if (l.top !== top) { l.el.style.top = `${top}px`; l.top = top; }
   if (l.op !== op) { l.el.style.opacity = op; l.op = op; }
 }
-// Once the pixel fonts are loaded, measure all sizes again.
-document.fonts && document.fonts.ready.then(() => { for (const l of labels.values()) l.text = null; });
+// Once the pixel fonts are loaded, measure all sizes again (labels measured with the fallback font are too wide
+// and would push speech bubbles on top of each other). fonts.ready alone is not enough: it can resolve before
+// the first label even asks for a font.
+if (document.fonts) {
+  const remeasure = () => { for (const l of labels.values()) l.text = null; };
+  document.fonts.addEventListener("loadingdone", remeasure);
+  Promise.all([document.fonts.load("16px VT323"), document.fonts.load("8px Silkscreen")]).then(remeasure, () => {});
+}
 
 /** Signs and speech bubbles of the current house, plus a name sign above each neighbor house. */
 function updateOverlay(h, L, S, ox, oy, W, neighbors) {
@@ -887,7 +893,10 @@ function updateOverlay(h, L, S, ox, oy, W, neighbors) {
     const waiting = nh.boss && nh.boss.state.status === "waiting";
     const text = `${waiting ? "! " : replay ? "▶ " : ""}${basename(nh.cwd)}`;
     const l = label(`n:${nh.id}`, `plaque ${waiting ? "gold" : ""} sz-${sz}`, text);
-    place(l, Math.round((p.x + HX + HW / 2) * S - l.w / 2), Math.round((p.y + ROOF_TOP) * S) - l.h - 6);
+    // centered over the visible part of the house, so it stays on screen when the house is cut off
+    const a = Math.max(0, (p.x + HX) * S), b = Math.min(W, (p.x + HX + HW) * S);
+    const left = clamp(Math.round((a + b) / 2 - l.w / 2), 4, W - l.w - 4);
+    place(l, left, Math.round((p.y + ROOF_TOP) * S) - l.h - 6);
   }
 
   for (const [k, l] of labels) if (l.seen !== frameNo) { l.el.remove(); labels.delete(k); }
@@ -895,7 +904,7 @@ function updateOverlay(h, L, S, ox, oy, W, neighbors) {
 
 // ---------------------------------------------------------------- Sounds (WebAudio, can be turned off)
 let soundOn = false;
-try { soundOn = localStorage.getItem("agent-haus-ton") === "an"; } catch { /* no storage: stays off */ }
+try { soundOn = localStorage.getItem("sublet-sound") === "an"; } catch { /* no storage: stays off */ }
 let actx = null;
 function audio() {
   if (!actx) actx = new (window.AudioContext || window.webkitAudioContext)();
@@ -941,7 +950,7 @@ const soundBtn = document.getElementById("sound");
 function renderSoundBtn() { soundBtn.textContent = t("btn.sound", { on: soundOn }); soundBtn.setAttribute("aria-pressed", String(soundOn)); }
 soundBtn.addEventListener("click", () => {
   soundOn = !soundOn;
-  try { localStorage.setItem("agent-haus-ton", soundOn ? "an" : "aus"); } catch { /* never mind */ }
+  try { localStorage.setItem("sublet-sound", soundOn ? "an" : "aus"); } catch { /* never mind */ }
   renderSoundBtn();
   if (soundOn) play("report");
 });
@@ -1155,7 +1164,7 @@ let attention = null; // { session, dir } while Claude waits for you and this ta
 let blinkOn = false;
 const canNotify = "Notification" in window;
 let notifyOn = false;
-try { notifyOn = canNotify && Notification.permission === "granted" && localStorage.getItem("agent-haus-notify") === "on"; } catch { /* stays off */ }
+try { notifyOn = canNotify && Notification.permission === "granted" && localStorage.getItem("sublet-notify") === "on"; } catch { /* stays off */ }
 const notifyBtn = document.getElementById("notifyBtn");
 function renderNotifyBtn() { notifyBtn.textContent = t("btn.notify", { on: notifyOn }); notifyBtn.setAttribute("aria-pressed", String(notifyOn)); }
 notifyBtn.hidden = !canNotify;
@@ -1167,7 +1176,7 @@ notifyBtn.addEventListener("click", async () => {
     notifyOn = perm === "granted";
     notifyBtn.title = notifyOn ? t("btn.notify.title") : t("btn.notify.denied");
   }
-  try { localStorage.setItem("agent-haus-notify", notifyOn ? "on" : "off"); } catch { /* never mind */ }
+  try { localStorage.setItem("sublet-notify", notifyOn ? "on" : "off"); } catch { /* never mind */ }
   renderNotifyBtn();
 });
 renderNotifyBtn();

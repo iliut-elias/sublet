@@ -1,8 +1,8 @@
-// Plays a made-up Claude Code session into a running Agent-Haus, so you can see the house without Claude.
+// Plays a made-up Claude Code session into a running Sublet, so you can see the house without Claude.
 // Usage: node server.mjs   (in one terminal)
 //        node tools/demo.mjs [--loop]
 // Demo sessions are not written to the log and do not show up in Replay.
-const PORT = Number(process.env.AGENT_HAUS_PORT || 4317);
+const PORT = Number(process.env.SUBLET_PORT || 4317);
 const LOOP = process.argv.includes("--loop");
 const URL_EVENT = `http://127.0.0.1:${PORT}/event`;
 
@@ -71,6 +71,6 @@ async function run() {
 }
 
 run().catch((err) => {
-  console.error(`Could not reach the Agent-Haus on port ${PORT} (${err.message}). Start it first: node server.mjs`);
+  console.error(`Could not reach Sublet on port ${PORT} (${err.message}). Start it first: node server.mjs`);
   process.exit(1);
 });

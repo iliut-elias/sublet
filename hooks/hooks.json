@@ -1,5 +1,5 @@
 {
-  "description": "Agent-Haus: sends every hook event to the local Agent-Haus server (127.0.0.1:4317, nothing leaves your computer) and asks Claude to give subagents short names.",
+  "description": "Sublet: sends every hook event to the local Sublet server (127.0.0.1:4317, nothing leaves your computer) and asks Claude to give subagents short names.",
   "hooks": {
     "SessionStart": [
       {

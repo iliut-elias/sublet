@@ -1,4 +1,4 @@
-// Agent-Haus – texts in English and German.
+// Sublet – texts in English and German.
 // Language: ?lang=en|de, otherwise the browser language (German for "de-*", English for everything else).
 // The server sends language-neutral messages as [key, params]; tr() turns them into text here.
 "use strict";
@@ -18,7 +18,7 @@ const TYPE_NAMES = {
 const STR = {
   en: {
     // header and page
-    "page.label": "Agent-Haus: pixel view of the running Claude Code agents",
+    "page.label": "Sublet: pixel view of the running Claude Code agents",
     "conn.connecting": "connecting …",
     "conn.live": "live",
     "conn.lost": "connection lost, retrying …",
@@ -39,7 +39,7 @@ const STR = {
     "plaque.boss": (p) => `Boss · ${p.dir}`,
     "plaque.bossEmpty": "Top floor",
     "plaque.free": "vacant",
-    "sign": "AGENT-HAUS",
+    "sign": "SUBLET",
     "status.working": "working",
     "status.idle": "idle",
     "status.waiting": "needs you",
@@ -77,7 +77,7 @@ const STR = {
     "replay.speed": "Speed",
     "replay.title": "Replay a session",
     "replay.none": "No saved sessions yet.",
-    "replay.off": "The log is off (AGENT_HAUS_LOG=0), so there is nothing to replay.",
+    "replay.off": "The log is off (SUBLET_LOG=0), so there is nothing to replay.",
     "replay.noTime": "no timestamp",
     "replay.subagents": (p) => `${p.n} subagent${p.n === 1 ? "" : "s"}`,
     "replay.events": (p) => `${p.n} events`,
@@ -131,7 +131,7 @@ const STR = {
     "ev.other": (p) => p.n,
   },
   de: {
-    "page.label": "Agent-Haus: Pixel-Ansicht der laufenden Claude-Code-Agents",
+    "page.label": "Sublet: Pixel-Ansicht der laufenden Claude-Code-Agents",
     "conn.connecting": "verbinde …",
     "conn.live": "live",
     "conn.lost": "Verbindung weg, versuche neu …",
@@ -151,7 +151,7 @@ const STR = {
     "plaque.boss": (p) => `Chef · ${p.dir}`,
     "plaque.bossEmpty": "Chefetage",
     "plaque.free": "frei",
-    "sign": "AGENT-HAUS",
+    "sign": "SUBLET",
     "status.working": "arbeitet",
     "status.idle": "frei",
     "status.waiting": "braucht dich",
@@ -186,7 +186,7 @@ const STR = {
     "replay.speed": "Tempo",
     "replay.title": "Session abspielen",
     "replay.none": "Noch keine gespeicherten Sessions.",
-    "replay.off": "Das Log ist aus (AGENT_HAUS_LOG=0), es gibt nichts zum Abspielen.",
+    "replay.off": "Das Log ist aus (SUBLET_LOG=0), es gibt nichts zum Abspielen.",
     "replay.noTime": "ohne Zeitstempel",
     "replay.subagents": (p) => `${p.n} Subagent${p.n === 1 ? "" : "s"}`,
     "replay.events": (p) => `${p.n} Ereignisse`,

@@ -1,13 +1,13 @@
 {
-  "name": "agent-haus",
+  "name": "sublet",
   "version": "1.0.0",
   "description": "Watch your Claude Code sessions live as a pixel house: the main agent works on the top floor, every subagent moves into its own room, visits others, reports back and moves out.",
   "author": {
     "name": "Elias Iliut",
     "url": "https://github.com/iliut-elias"
   },
-  "homepage": "https://github.com/iliut-elias/agent-haus",
-  "repository": "https://github.com/iliut-elias/agent-haus",
+  "homepage": "https://github.com/iliut-elias/sublet",
+  "repository": "https://github.com/iliut-elias/sublet",
   "license": "MIT",
   "keywords": [
     "subagents",

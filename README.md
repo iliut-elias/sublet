@@ -1,8 +1,8 @@
-# Agent-Haus
+# Sublet
 
-Watch your Claude Code sessions live as a pixel house.
+Your subagents sublet a room. Watch your Claude Code sessions live as a pixel house.
 
-![The Agent-Haus: a boss on the top floor, three subagents in their rooms, one visiting another](docs/demo.gif)
+![Sublet: a boss on the top floor, three subagents in their rooms, one visiting another](docs/demo.gif)
 
 The main agent works on the top floor. Every subagent comes in through the front door, gets its own room and types away at its desk while it works. When it sends another agent a message, it walks over and knocks. When it is done, it brings its report to the boss, packs a moving box and leaves. If you run several sessions at once, their houses stand side by side in a little street.
 
@@ -16,12 +16,12 @@ You need Claude Code (tested with 2.1.331), Node.js 20 or newer, `curl` and a PO
 
 1. Install the plugin in Claude Code:
    ```
-   /plugin marketplace add iliut-elias/agent-haus
-   /plugin install agent-haus@agent-haus
+   /plugin marketplace add iliut-elias/sublet
+   /plugin install sublet@sublet
    ```
-   On Claude Code 2.1.275 or later this also works in one step: `/plugin install agent-haus --marketplace iliut-elias/agent-haus`.
+   On Claude Code 2.1.275 or later this also works in one step: `/plugin install sublet --marketplace iliut-elias/sublet`.
 2. Restart Claude Code, because plugins load at startup.
-3. Open the house with `/agent-haus:open`. It starts the server in the background and opens <http://127.0.0.1:4317>. `/agent-haus:stop` stops it again.
+3. Open the house with `/sublet:open`. It starts the server in the background and opens <http://127.0.0.1:4317>. `/sublet:stop` stops it again.
 
 From then on, every Claude Code session shows up in the house, whatever folder you start it in. If the server is not running, the hooks simply do nothing.
 
@@ -44,6 +44,7 @@ From then on, every Claude Code session shows up in the house, whatever folder y
 | Claude waits for you | The boss strolls around the top floor |
 
 More details:
+- **As many subagents as you like:** every three subagents get a new floor, and the view zooms out to fit the house. Rooms are reused when agents move out.
 - **Names:** Claude gives every subagent a nickname (the plugin asks for it when a session starts). Without one, the house uses a fallback like “Scout 1”.
 - **Furniture by type:** Explore agents get a map, Plan agents a whiteboard, everyone else a picture. Agents that use the terminal a lot get a second screen.
 - **Time of day:** night, morning, day and evening follow your clock.
@@ -67,24 +68,24 @@ When it is on and the house is open, the `PermissionRequest` hook waits up to 60
 
 ## Privacy
 
-The server keeps a log in `~/.agent-haus/events.jsonl`, for Replay and so a restart does not empty the house. It stores shortened events only:
+The server keeps a log in `~/.sublet/events.jsonl`, for Replay and so a restart does not empty the house. It stores shortened events only:
 - your prompts (first 300 characters) and each agent's last answer (first 400 characters),
 - tool names with short inputs: file paths, commands and search patterns (up to 300 characters).
 
-It never stores file contents or tool output. Sessions older than 7 days are deleted when the server starts and every 6 hours. Set `AGENT_HAUS_LOG=0` to store nothing at all.
+It never stores file contents or tool output. Sessions older than 7 days are deleted when the server starts and every 6 hours. Set `SUBLET_LOG=0` to store nothing at all.
 
 ## Settings
 
-All settings are environment variables. The hooks run inside Claude Code, so variables they need (`AGENT_HAUS_PORT`, `AGENT_HAUS_NAMES`) belong in the `env` block of `~/.claude/settings.json`. The server reads them from the shell you start it in.
+All settings are environment variables. The hooks run inside Claude Code, so variables they need (`SUBLET_PORT`, `SUBLET_NAMES`) belong in the `env` block of `~/.claude/settings.json`. The server reads them from the shell you start it in.
 
 | Variable | Default | What it does |
 |---|---|---|
-| `AGENT_HAUS_PORT` | `4317` | Port of the server (hooks and server must agree) |
-| `AGENT_HAUS_DATA` | `~/.agent-haus` | Folder for the log |
-| `AGENT_HAUS_LOG` | on | `0` stores nothing (no Replay, nothing survives a restart) |
-| `AGENT_HAUS_KEEP_DAYS` | `7` | How long stored sessions are kept |
-| `AGENT_HAUS_NAMES` | on | `0` does not ask Claude to name its subagents |
-| `AGENT_HAUS_NO_BROWSER` | off | `1` makes `/agent-haus:open` start the server without opening a browser |
+| `SUBLET_PORT` | `4317` | Port of the server (hooks and server must agree) |
+| `SUBLET_DATA` | `~/.sublet` | Folder for the log |
+| `SUBLET_LOG` | on | `0` stores nothing (no Replay, nothing survives a restart) |
+| `SUBLET_KEEP_DAYS` | `7` | How long stored sessions are kept |
+| `SUBLET_NAMES` | on | `0` does not ask Claude to name its subagents |
+| `SUBLET_NO_BROWSER` | off | `1` makes `/sublet:open` start the server without opening a browser |
 
 ## How it works
 
@@ -101,7 +102,7 @@ Claude Code hooks ──curl──▶ server.mjs (127.0.0.1:4317) ──Server-S
 | `server.mjs` | Keeps the state, slims and stores the events, streams them to the browser |
 | `public/haus.js` | The house: pixel canvas, characters, paths, street, time of day, sounds, panel, Replay |
 | `public/i18n.js` | All texts in English and German |
-| `bin/agent-haus.mjs` | Starts and stops the server in the background (used by `/agent-haus:open`) |
+| `bin/sublet.mjs` | Starts and stops the server in the background (used by `/sublet:open`) |
 | `tools/demo.mjs` | Plays a made-up session |
 
 ### This can break with a Claude Code update
