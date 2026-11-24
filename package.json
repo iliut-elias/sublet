@@ -1,0 +1,15 @@
+{
+  "name": "agent-haus",
+  "version": "1.0.0",
+  "description": "Watch your Claude Code sessions live as a pixel house.",
+  "private": true,
+  "license": "MIT",
+  "author": "Elias Iliut (https://github.com/iliut-elias)",
+  "repository": "github:iliut-elias/agent-haus",
+  "engines": { "node": ">=20" },
+  "scripts": {
+    "start": "node server.mjs",
+    "demo": "node tools/demo.mjs",
+    "check": "node --check server.mjs && node --check public/haus.js && node --check public/i18n.js && node --check bin/agent-haus.mjs && node --check tools/demo.mjs"
+  }
+}

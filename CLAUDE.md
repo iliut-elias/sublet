@@ -1,20 +1,26 @@
-# Agent-Haus
+# Agent-Haus – notes for working on this repo
 
-Dieses Projekt zeigt Claude-Code-Sessions live als Haus mit Agent-Figuren (siehe README.md).
+Shows Claude Code sessions live as a pixel house (see README.md). It is also a Claude Code plugin:
+`.claude-plugin/` holds the plugin and marketplace manifests, `hooks/hooks.json` the hooks.
 
-## Subagents benennen
-Jeder Subagent wohnt im Haus in einem eigenen Raum und trägt dort einen Namen.
-Wenn du einen Subagent startest (Agent-Tool), denk dir einen eigenen Namen für ihn aus
-und schreib ihn in eckigen Klammern an den Anfang der `description`.
+## Rules
+- No npm dependencies and no build step. Node 20+ on the server, plain browser JavaScript in `public/`.
+- Every visible text exists in English and German in `public/i18n.js`. The server sends language-neutral
+  messages as `[key, params]` (see `describeTool` and `ingest` in `server.mjs`) and never finished text.
+- Store as little as possible: `sanitize()` in `server.mjs` decides what reaches the log. Never store
+  file contents, tool output or full commands.
+- Hook scripts are POSIX `sh` with `curl`, must stay fast and must never block Claude Code (short timeouts, `|| true`).
+- The server only listens on 127.0.0.1 and checks `Host` and `Origin`. Keep it that way for every new endpoint.
 
-Format: `[Name] kurze Aufgabe`, z. B. `[Name] index.html auf Fehler prüfen`.
+## Testing
+- `node server.mjs`, then `node tools/demo.mjs` plays a made-up session (not stored, not in Replay).
+- `?time=night|morning|day|evening` and `?lang=en|de` in the URL.
+- Use a separate port and data folder for experiments: `AGENT_HAUS_PORT=4399 AGENT_HAUS_DATA=/tmp/ah node server.mjs`.
+- Plugin: `claude --plugin-dir .`. If the plugin is installed too, every event arrives twice.
 
-Regeln:
-- Ein Wort, höchstens 16 Zeichen, mit Charakter und passend zur Aufgabe
-  (ein Spitzname wie für eine Figur, keine reine Funktionsbezeichnung wie "Reader").
-- Jedes Mal neu ausdenken, keine festen Lieblingsnamen wiederverwenden.
-- Keine zwei gleichen Namen in einer Session.
-- Der Rest der Beschreibung bleibt eine kurze Aufgabe (3–6 Wörter).
-
-Der Name ist nur für die Anzeige im Haus. Für `SendMessage` an einen Subagent nimm seine
-**Agent-ID** (die du beim Start zurückbekommst), nicht den Namen aus den Klammern.
+## Hook facts (Claude Code 2.1.331)
+- Subagent events carry `agent_id` and `agent_type`; without `agent_id` it is the main agent.
+- `SubagentStart` has no `tool_use_id`: tasks are matched by the order of the Agent tool calls.
+- `SendMessage`: the recipient is in `tool_input.to` (agent ID); afterwards the same agent sends `SubagentStart` again.
+- `PermissionRequest` answer: `{"hookSpecificOutput":{"hookEventName":"PermissionRequest","decision":{"behavior":"allow"}}}`
+  or `{"behavior":"deny","message":"..."}`. Empty output means Claude Code asks in the terminal.
